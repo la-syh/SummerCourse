@@ -2,3 +2,4 @@
 *.bundle
 作业说明.md
 /.vscode
+__pycache__/
