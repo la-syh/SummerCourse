@@ -8,11 +8,13 @@ import os
 import hashlib
 
 class Crawler:
-    def __init__(self, start_urls, wait_time=5., max_count = 100_000, 
+    def __init__(self, start_urls, wait_time=5., max_count = 200_000, 
                  checkpoint_file='crawler_checkpoint.json',
                  save_interval=1000,
                  html_dir = 'downloaded_html'):
         self.start_urls = start_urls
+        if isinstance(self.start_urls, str):
+            self.start_urls = [self.start_urls]
         self.wait_time = wait_time
         self.max_count = max_count
         self.save_interval = save_interval
@@ -31,6 +33,11 @@ class Crawler:
         ".svg", ".mp3", ".wav", ".mp4", ".avi", ".mov",
         )
         frontier, self.all_links, self.last_fetch_time, count = self.load_checkpoint(self.start_urls)
+
+        hostnames = set()
+        for url in self.start_urls:
+            hostnames.add(urlparse(url).hostname)
+
         try:
             while frontier and count < self.max_count:
                 _, _, url = heapq.heappop(frontier)
@@ -50,7 +57,7 @@ class Crawler:
                         if self.is_ignored_file(new_url):
                             print(f'跳过文件 {new_url}')
                             continue
-                        if new_url in self.all_links:
+                        if new_url in self.all_links or urlparse(new_url).hostname not in hostnames:
                             continue
                         self.all_links.add(new_url)
                         self.push_url(frontier, new_url, self.calc_priority(new_url, url))
@@ -212,4 +219,4 @@ if __name__ == "__main__":
         'https://gsai.ruc.edu.cn'
     ]
     crawl_tester = Crawler(start_urls=start_urls, wait_time=1,
-                           max_count=10000)
+                           max_count=200000)
