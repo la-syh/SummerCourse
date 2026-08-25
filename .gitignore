@@ -3,3 +3,7 @@
 作业说明.md
 /.vscode
 __pycache__/
+downloaded_html/
+crawler_checkpoint.json
+crawler_checkpoint.json.tmp
+crawled_links
