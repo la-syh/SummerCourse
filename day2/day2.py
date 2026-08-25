@@ -17,7 +17,7 @@ class Crawler:
         q, self.all_links, count = deque([url]), set({url}), 0
         while len(q) > 0 and count < max_count:
             u, count = q.popleft(), count + 1
-            html = BeautifulSoup(u, headers=self.headers, timeout=10)
+            html = self.get_html(u, headers=self.headers, timeout=10)
             if html == None:
                 continue
             links = ExtractHTML(html).extract_links(u)
@@ -27,4 +27,10 @@ class Crawler:
                     q.append(new_url)
             if wait_time > 0:
                 time.sleep(wait_time)
-        
+    def __str__(self):
+        return '\n'.join(sorted(self.all_links))
+
+if __name__ == "__main__":
+    # 测试
+    crawl_tester = Crawler('https://www.ruc.edu.cn/', max_count=10, wait_time=1)
+    print(crawl_tester)
