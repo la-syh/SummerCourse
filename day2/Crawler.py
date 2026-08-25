@@ -35,6 +35,18 @@ class Crawler:
         )
         frontier, self.all_links, self.last_fetch_time, count = self.load_checkpoint(self.start_urls)
         host_frontiers, host_rotation, scheduled_hosts = {}, deque(), set()
+        for start_url in self.start_urls:
+            if start_url in self.all_links:
+                continue
+            self.all_links.add(start_url)
+            self.sequence += 1
+            item = (
+                -self.calc_priority(start_url),
+                self.sequence,
+                start_url,
+            )
+            heapq.heappush(frontier, item)  # 修正 https://clr.ruc.edu.cn/zwwz/index.htm
+
         for item in sorted(frontier):
             self.add_host_item(host_frontiers, host_rotation, scheduled_hosts, item)
 
@@ -243,7 +255,7 @@ if __name__ == "__main__":
     start_urls = [
         'http://pd.ruc.edu.cn/',
         'http://sph.ruc.edu.cn/',
-        'https://clr.ruc.edu.cn/',
+        'https://clr.ruc.edu.cn/zwwz/index.htm',
         'http://dis.ruc.edu.cn/',
         'http://dsdj.ruc.edu.cn/',
         'http://scsce.ruc.edu.cn/',

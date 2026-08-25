@@ -14,14 +14,22 @@ class ExtractHTML:
             if not isinstance(href, str):
                 continue
             href = href.strip()
-            if href == None or href.lower().startswith('javascript:'):
+            if not href or href.lower().startswith('javascript:'):
                 continue
             absolute_url = urljoin(url, href)
             absolute_url, _ = urldefrag(absolute_url)
             parsed = urlparse(absolute_url)
-            if parsed.scheme not in {'http', 'https'}:
+            if parsed.scheme not in {'http', 'https'} or not parsed.hostname:
                 continue
-            all_links.add(url_normalize(absolute_url))
+            if '%' in parsed.hostname:
+                print(f'跳过错误域名: {absolute_url}')
+                continue
+            try:
+                normalized_url = url_normalize(absolute_url)
+            except (UnicodeError, ValueError) as error:
+                print(f'跳过无法规范化的链接: {absolute_url}, 原因: {error}')
+                continue
+            all_links.add(url_normalize(normalized_url))
         return all_links
     # 抓取标题与正文并分词
     def extract_title_and_body_words(self):

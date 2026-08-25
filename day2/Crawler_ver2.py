@@ -204,7 +204,7 @@ if __name__ == "__main__":
     start_urls = [
         'http://pd.ruc.edu.cn/',
         'http://sph.ruc.edu.cn/',
-        'https://clr.ruc.edu.cn/',
+        'https://clr.ruc.edu.cn/zwwz/index.htm',
         'http://dis.ruc.edu.cn/',
         'http://dsdj.ruc.edu.cn/',
         'http://scsce.ruc.edu.cn/',
