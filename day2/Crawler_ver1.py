@@ -1,4 +1,4 @@
-from day1.day1 import ExtractHTML
+from day1.ExtractHTML import ExtractHTML
 from bs4 import BeautifulSoup
 from collections import deque
 import os

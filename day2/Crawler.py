@@ -1,4 +1,4 @@
-from day1.day1 import ExtractHTML
+from day1.ExtractHTML import ExtractHTML
 import requests
 import heapq
 import time
