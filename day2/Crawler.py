@@ -34,7 +34,10 @@ class Crawler:
         ".svg", ".mp3", ".wav", ".mp4", ".avi", ".mov",
         )
         frontier, self.all_links, self.last_fetch_time, count = self.load_checkpoint(self.start_urls)
-        host_frontiers, host_rotation, scheduled_hosts = {}, deque(), set()
+        hostnames = {urlparse(url).hostname for url in self.start_urls}
+
+        self.recover_saved_redirects(frontier, hostnames)
+
         for start_url in self.start_urls:
             if start_url in self.all_links:
                 continue
@@ -47,12 +50,9 @@ class Crawler:
             )
             heapq.heappush(frontier, item)  # 修正 https://clr.ruc.edu.cn/zwwz/index.htm
 
+        host_frontiers, host_rotation, scheduled_hosts = {}, deque(), set()
         for item in sorted(frontier):
             self.add_host_item(host_frontiers, host_rotation, scheduled_hosts, item)
-
-        hostnames = set()
-        for url in self.start_urls:
-            hostnames.add(urlparse(url).hostname)
 
         try:
             while host_rotation and count < self.max_count:
@@ -217,7 +217,8 @@ class Crawler:
             'all_links': list(self.all_links),
             'last_fetch_time': self.last_fetch_time,
             'count': count,
-            'sequence':self.sequence
+            'sequence': self.sequence,
+            'redirect_recovery_version': self.redirect_recovery_version,
         }
         temp_file = self.checkpoint_file + '.tmp'
         with open(temp_file, 'w', encoding='utf-8') as file:
@@ -236,6 +237,10 @@ class Crawler:
                 last_fetch_time = state.get('last_fetch_time', dict())
                 count = state.get('count', 0)
                 self.sequence = state.get('sequence', 0)
+                self.redirect_recovery_version = state.get(
+                    'redirect_recovery_version',
+                    0,
+                )
                 return frontier, all_links, last_fetch_time, count
             except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
                 print(f'断点恢复失败, 重新开始 {error}')
@@ -249,7 +254,69 @@ class Crawler:
             self.sequence += 1
             item = (-self.calc_priority(url), self.sequence, url)
             heapq.heappush(frontier, item)
+        self.redirect_recovery_version = 1
         return frontier, set(start_urls), dict(), 0
+
+    def recover_saved_redirects(self, frontier, allowed_hostnames):
+        '''从已经保存的 HTML 中一次性找回以前漏掉的静态跳转。'''
+        if self.redirect_recovery_version >= 1:
+            return
+        if not os.path.exists(self.url_index_file):
+            self.redirect_recovery_version = 1
+            return
+
+        html_root = os.path.abspath(self.html_dir)
+        indexed_pages = {}
+        try:
+            with open(self.url_index_file, 'r', encoding='utf-8') as index_file:
+                for line in index_file:
+                    try:
+                        record = json.loads(line)
+                        indexed_pages[record['file']] = record['url']
+                    except (json.JSONDecodeError, KeyError, TypeError):
+                        continue
+        except OSError as error:
+            print(f'读取 HTML 索引失败，跳过跳转恢复: {error}')
+            return
+
+        recovered_count = 0
+        for relative_path, source_url in indexed_pages.items():
+            file_path = os.path.abspath(os.path.join(self.html_dir, relative_path))
+            try:
+                if os.path.commonpath((html_root, file_path)) != html_root:
+                    continue
+                with open(file_path, 'rb') as html_file:
+                    html = html_file.read()
+            except (OSError, ValueError):
+                continue
+
+            lower_html = html.lower()
+            if b'location.href' not in lower_html \
+                    and b'location.replace' not in lower_html \
+                    and b'http-equiv' not in lower_html:
+                continue
+
+            redirect_links = ExtractHTML(html).extract_redirect_links(source_url)
+            for new_url in redirect_links:
+                hostname = urlparse(new_url).hostname
+                if (new_url in self.all_links
+                        or hostname not in allowed_hostnames
+                        or self.is_ignored_file(new_url)):
+                    continue
+                self.all_links.add(new_url)
+                self.sequence += 1
+                heapq.heappush(
+                    frontier,
+                    (
+                        -self.calc_priority(new_url, source_url),
+                        self.sequence,
+                        new_url,
+                    ),
+                )
+                recovered_count += 1
+
+        self.redirect_recovery_version = 1
+        print(f'从已保存 HTML 中恢复 {recovered_count} 个跳转目标')
 
 if __name__ == "__main__":
     start_urls = [

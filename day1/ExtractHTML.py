@@ -1,36 +1,87 @@
 from bs4 import BeautifulSoup
 import jieba
+import re
 from url_normalize import url_normalize
 from urllib.parse import urljoin, urldefrag, urlparse
 
 class ExtractHTML:
     def __init__(self, html_doc):
         self.soup = BeautifulSoup(html_doc, 'html5lib')
+
+    def normalize_link(self, href, base_url):
+        if not isinstance(href, str):
+            return None
+        href = href.strip()
+        if not href or href.lower().startswith('javascript:'):
+            return None
+
+        absolute_url = urljoin(base_url, href)
+        absolute_url, _ = urldefrag(absolute_url)
+        parsed = urlparse(absolute_url)
+        if parsed.scheme not in {'http', 'https'} or not parsed.hostname:
+            return None
+        if '%' in parsed.hostname:
+            print(f'跳过错误域名: {absolute_url}')
+            return None
+
+        try:
+            return url_normalize(absolute_url)
+        except (UnicodeError, ValueError) as error:
+            print(f'跳过无法规范化的链接: {absolute_url}, 原因: {error}')
+            return None
+
     # 提取文档中所有链接
     def extract_links(self, url = ''):
         all_links = set()
         for anchor in self.soup.find_all('a'):
-            href = anchor.get('href')
-            if not isinstance(href, str):
-                continue
-            href = href.strip()
-            if not href or href.lower().startswith('javascript:'):
-                continue
-            absolute_url = urljoin(url, href)
-            absolute_url, _ = urldefrag(absolute_url)
-            parsed = urlparse(absolute_url)
-            if parsed.scheme not in {'http', 'https'} or not parsed.hostname:
-                continue
-            if '%' in parsed.hostname:
-                print(f'跳过错误域名: {absolute_url}')
-                continue
-            try:
-                normalized_url = url_normalize(absolute_url)
-            except (UnicodeError, ValueError) as error:
-                print(f'跳过无法规范化的链接: {absolute_url}, 原因: {error}')
-                continue
-            all_links.add(url_normalize(normalized_url))
+            normalized_url = self.normalize_link(anchor.get('href'), url)
+            if normalized_url is not None:
+                all_links.add(normalized_url)
+
+        all_links.update(self.extract_redirect_links(url))
         return all_links
+
+    def extract_redirect_links(self, url = ''):
+        '''提取 meta refresh 和简单的 JavaScript 字面量跳转。'''
+        redirect_links = set()
+
+        for meta in self.soup.find_all('meta'):
+            http_equiv = meta.get('http-equiv', '')
+            content = meta.get('content', '')
+            if (not isinstance(http_equiv, str)
+                    or http_equiv.lower() != 'refresh'
+                    or not isinstance(content, str)):
+                continue
+            match = re.search(
+                r'''url\s*=\s*(?:"([^"]+)"|'([^']+)'|([^;\s]+))''',
+                content,
+                flags=re.IGNORECASE,
+            )
+            if match:
+                href = next(group for group in match.groups() if group is not None)
+                normalized_url = self.normalize_link(href, url)
+                if normalized_url is not None:
+                    redirect_links.add(normalized_url)
+
+        assignment_pattern = re.compile(
+            r'''(?:window\.)?location\.href\s*=\s*(["'])(.*?)\1''',
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        replace_pattern = re.compile(
+            r'''(?:window\.)?location\.replace\s*\(\s*(["'])(.*?)\1\s*\)''',
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        for script in self.soup.find_all('script'):
+            script_text = script.string or script.get_text()
+            if not script_text:
+                continue
+            for pattern in (assignment_pattern, replace_pattern):
+                for match in pattern.finditer(script_text):
+                    normalized_url = self.normalize_link(match.group(2), url)
+                    if normalized_url is not None:
+                        redirect_links.add(normalized_url)
+
+        return redirect_links
     # 抓取标题与正文并分词
     def extract_title_and_body_words(self):
         title = self.soup.title.get_text(strip = True) if self.soup.title else ''
