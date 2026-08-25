@@ -1,20 +1,23 @@
 from bs4 import BeautifulSoup
 import jieba
-# from url_normalize import url_normalize
+from url_normalize import url_normalize
 
 class ExtractHTML:
     def __init__(self, html_doc):
         self.soup = BeautifulSoup(html_doc, 'html5lib')
     # 提取文档中所有链接
-    def extract_links(self):
+    def extract_links(self, url = ''):
         all_links = set()
         for anchor in self.soup.find_all('a'):
             href = anchor.get('href')
             if not isinstance(href, str):
                 continue
             href = href.strip()
-            if href and not href.lower().startswith('javascript:'):
-                all_links.add(href) 
+            if href == None or href.lower().startswith('javascript:'):
+                continue
+            if not href.lower().startswith('http'):
+                href = url + href
+            all_links.add(url_normalize(href))
         return all_links
     # 抓取标题与正文并分词
     def extract_title_and_body_words(self):

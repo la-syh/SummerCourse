@@ -1,1 +1,4 @@
 .DS_Store
+*.bundle
+作业说明.md
+/.vscode
