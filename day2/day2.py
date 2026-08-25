@@ -7,7 +7,7 @@ import time
 import requests
 
 class Crawler:
-    def __init__(self, url, max_count=500000, wait_time=5,
+    def __init__(self, url, max_count=1_000_000, wait_time=5,
                  checkpointfile='crawler_checkpoint.json', save_interval=10):
         self.headers = {'user-agent': 'my-app/0.0.1'}
         self.checkpointfile, self.save_interval = checkpointfile, save_interval
@@ -79,6 +79,6 @@ class Crawler:
 
 if __name__ == "__main__":
     # 测试
-    crawl_tester = Crawler('https://www.ruc.edu.cn/', max_count=1000, wait_time=1)
+    crawl_tester = Crawler('https://news.ruc.edu.cn/', wait_time=1)
     with open('crawled_links', 'w', encoding='utf-8') as file:
         file.write(crawl_tester.__str__())
