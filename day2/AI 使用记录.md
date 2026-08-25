@@ -204,6 +204,41 @@ all_links = set(state.get('all_links', []))
 
 AI建议先建立备份分支，再将当前提交接到 `main`，并在提交删除前确认导入路径是否同步更新。该建议用于避免直接 `git add -A` 后把无法运行的版本推送到远程仓库。
 
+### 13. 处理正文被误识别为域名的异常链接
+
+运行过程中，`url_normalize()` 抛出了 `idna.core.InvalidCodepoint` 和 `UnicodeError: label too long`。报错中的“域名”实际上包含一大段百分号编码的中文正文。检查原网页后发现，某个异常 `href` 把正常网址和后面的中文说明混在了一起。`urljoin()` 因而生成了一个格式错误的绝对地址，`urlparse()` 又把其中一部分正文放进 `hostname`；随后 `url_normalize()` 尝试按照 IDNA 域名规则处理这段内容，最终报错。
+
+AI说明这不是中文正文或 `url_normalize()` 本身无条件失效，而是输入链接已经不是合法 URL。为避免单个坏链接终止整个爬虫，链接规范化前增加了结构检查，并对规范化异常进行局部处理：
+
+```python
+parsed = urlparse(absolute_url)
+if parsed.scheme not in {'http', 'https'} or not parsed.hostname:
+    continue
+if '%' in parsed.hostname:
+    print(f'跳过错误域名: {absolute_url}')
+    continue
+
+try:
+    normalized_url = url_normalize(absolute_url)
+except (UnicodeError, ValueError) as error:
+    print(f'跳过无法规范化的链接: {absolute_url}, 原因: {error}')
+    continue
+```
+
+这样处理后，异常链接只会被跳过，其他合法链接仍能继续进入抓取队列。
+
+### 14. 排查 `clr.ruc.edu.cn` 无法继续向下抓取
+
+抓取化学与生命资源学院网站时，我发现从原入口取得的 HTML 中没有得到预期的后续页面，表现为该主机很快停止扩展。AI协助区分了“请求失败”和“页面成功下载但静态 HTML 不包含可遍历链接”两种情况，并说明部分网站可能依靠 JavaScript 跳转、动态渲染、框架页或特殊入口加载实际内容；仅使用 `requests` 和 BeautifulSoup 的静态爬虫不会执行 JavaScript，因此即使 HTML 已保存，也不一定能发现真正的栏目链接。
+
+AI提出过识别脚本跳转或从页面结构中寻找真实入口的通用方案，但我确认本次任务不需要实现通用动态网页处理。最终直接将该网站的起始地址改为能够返回静态栏目链接的入口：
+
+```text
+https://clr.ruc.edu.cn/zwwz/index.htm
+```
+
+修改起始地址后，还检查了断点恢复时新起点的合并顺序：应先把断点中没有的新 `start_url` 加入总优先队列，再按 hostname 拆分到轮转队列。否则新地址虽然可能进入 `all_links`，却不会真正得到调度。最终版本按这一顺序初始化，因此可以保留已有断点并继续运行。
+
 ## 三、AI 建议的采纳与调整情况
 
 我采纳了以下建议：
@@ -218,6 +253,8 @@ AI建议先建立备份分支，再将当前提交接到 `main`，并在提交�
 - 使用字典记录不同主机的最近访问时间；
 - 保存 HTML 原始字节，并使用哈希文件名和 JSONL 索引；
 - 恢复断点时重建元组、集合和堆结构；
+- 在 URL 规范化前检查主机名，并跳过无法规范化的异常链接；
+- 对不提供可遍历静态链接的 CLR 入口改用明确的静态栏目页；
 - 在 `conda html` 环境中进行语法、导入、队列、断点和 HTML 保存测试；
 - 在 Git 推送前检查分支状态、未提交删除和模块导入路径。
 
@@ -225,6 +262,7 @@ AI建议先建立备份分支，再将当前提交接到 `main`，并在提交�
 
 - 不限制只能抓取 `ruc.edu.cn`，因为任务需要继续访问页面指向的外部网站；
 - 不启用定期重新抓取旧页面，只进行一次性抓取和断点续传；
+- 不实现 JavaScript 跳转和动态渲染页面的通用解析，针对 CLR 网站使用可直接遍历的静态入口；
 - 保留较简单的单线程按主机等待机制，没有实现多线程或复杂的主机调度器。
 
 ## 四、验证情况
@@ -235,6 +273,8 @@ AI在我指定的 `conda html` 环境中进行了不发起公网请求的检查�
 - 多起始 URL 初始化；
 - `heapq` 优先队列入队和出队；
 - ZIP 文件位于查询参数时的过滤；
+- 异常正文进入 hostname 时的 URL 过滤与容错；
+- CLR 新入口与旧断点合并后的调度检查；
 - HTML 原始字节保存；
 - URL 与文件索引生成；
 - JSON 断点保存；
