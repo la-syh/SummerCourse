@@ -16,12 +16,12 @@ class ExtractHTML:
             href = href.strip()
             if href == None or href.lower().startswith('javascript:'):
                 continue
-            abslote_url = urljoin(url, href)
-            abslote_url, _ = urldefrag(abslote_url)
-            parsed = urlparse(abslote_url)
+            absolute_url = urljoin(url, href)
+            absolute_url, _ = urldefrag(absolute_url)
+            parsed = urlparse(absolute_url)
             if parsed.scheme not in {'http', 'https'}:
                 continue
-            all_links.add(url_normalize(abslote_url))
+            all_links.add(url_normalize(absolute_url))
         return all_links
     # 抓取标题与正文并分词
     def extract_title_and_body_words(self):

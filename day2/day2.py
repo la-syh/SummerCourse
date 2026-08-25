@@ -5,12 +5,20 @@ import os
 import json
 import time
 import requests
+from urllib.parse import urlparse
 
 class Crawler:
-    def __init__(self, url, max_count=1_000_000, wait_time=5,
-                 checkpointfile='crawler_checkpoint.json', save_interval=10):
+    def __init__(self, url, max_count=1_000_000, wait_time=5.,
+                 checkpointfile='crawler_checkpoint.json', save_interval=1000):
         self.headers = {'user-agent': 'my-app/0.0.1'}
         self.checkpointfile, self.save_interval = checkpointfile, save_interval
+        self.ignored_suffixes = (
+            ".zip", ".rar", ".7z", ".tar", ".tar.gz", ".tgz",
+            ".pdf", ".doc", ".docx", ".xls", ".xlsx",
+            ".ppt", ".pptx",
+            ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg",
+            ".mp3", ".wav", ".mp4", ".avi", ".mov",
+        )
         q, self.all_links, count = self.load_checkpoint(url)
 
         try:
@@ -18,13 +26,17 @@ class Crawler:
                 u, count = q.popleft(), count + 1
                 print(f"[{count}/{max_count}] 正在访问：{u}", flush=True)
                 html = self.get_html(u, headers=self.headers, timeout=(3, 5))
-                if html == None:
-                    continue
-                links = ExtractHTML(html).extract_links(u)
-                for new_url in links:
-                    if new_url not in self.all_links:
-                        self.all_links.add(new_url)
-                        q.append(new_url)
+                if html is not None:
+                    links = ExtractHTML(html).extract_links(u)
+                    for new_url in links:
+                        parsed = urlparse(new_url)
+                        path = parsed.path.lower()
+                        if path.endswith(self.ignored_suffixes):
+                            print(f'跳过文件：{new_url}')
+                            continue
+                        if new_url not in self.all_links:
+                            self.all_links.add(new_url)
+                            q.append(new_url)
                 if count % save_interval == 0:
                     self.save_checkpoint(q, count)
                     print(f'已保存断点：完成 {count} 个页面，剩余 {len(q)} 个页面')
@@ -38,7 +50,9 @@ class Crawler:
         # if not q or count >= max_count:
         #     self.remove_checkpoint()
 
-    def get_html(self, uri, headers={}, timeout=None):
+    def get_html(self, uri, headers=None, timeout=None):
+        if headers == None:
+            headers = {}
         try:
             r = requests.get(uri, headers=headers, timeout=timeout)
             r.raise_for_status()
