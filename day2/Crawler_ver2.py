@@ -6,7 +6,6 @@ from urllib.parse import urlparse, unquote, parse_qs
 import json
 import os
 import hashlib
-from collections import deque
 
 class Crawler:
     def __init__(self, start_urls, wait_time=5., max_count = 200_000, 
@@ -34,17 +33,14 @@ class Crawler:
         ".svg", ".mp3", ".wav", ".mp4", ".avi", ".mov",
         )
         frontier, self.all_links, self.last_fetch_time, count = self.load_checkpoint(self.start_urls)
-        host_frontiers, host_rotation, scheduled_hosts = {}, deque(), set()
-        for item in sorted(frontier):
-            self.add_host_item(host_frontiers, host_rotation, scheduled_hosts, item)
 
         hostnames = set()
         for url in self.start_urls:
             hostnames.add(urlparse(url).hostname)
 
         try:
-            while host_rotation and count < self.max_count:
-                _, _, url = self.pop_host_url(host_frontiers, host_rotation, scheduled_hosts)
+            while frontier and count < self.max_count:
+                _, _, url = heapq.heappop(frontier)
                 if self.is_ignored_file(url):
                     print(f'跳过文件 {url}')
                     continue
@@ -64,19 +60,14 @@ class Crawler:
                         if new_url in self.all_links or urlparse(new_url).hostname not in hostnames:
                             continue
                         self.all_links.add(new_url)
-                        self.push_host_url(
-                            host_frontiers, host_rotation, scheduled_hosts,
-                            new_url, self.calc_priority(new_url, url)
-                        )
+                        self.push_url(frontier, new_url, self.calc_priority(new_url, url))
                 if count % self.save_interval == 0:
-                    self.save_checkpoint(self.flatten_host_frontiers(host_frontiers), count)
-                    remaining_count = sum(len(host_queue) for host_queue in host_frontiers.values())
-                    print(f'已保存断点, 共 {count} 个页面, 剩余 {remaining_count} 个页面')
+                    self.save_checkpoint(frontier, count)
+                    print(f'已保存断点, 共 {count} 个页面, 剩余 {len(frontier)} 个页面')
         except KeyboardInterrupt:
             print(f'程序被中断, 断点已保存')
         finally:
-            current_frontier = self.flatten_host_frontiers(host_frontiers)
-            self.save_checkpoint(current_frontier, count)
+            self.save_checkpoint(frontier, count)
 
     def get_html(self, uri, headers=None, timeout=None):
         '''从给定的 url 中获取 html 文档'''
@@ -111,37 +102,9 @@ class Crawler:
             score += 2  # 来源一致加两分
         return score
 
-    def add_host_item(self, host_frontiers, host_rotation, scheduled_hosts, item):
-        _, _, url = item
-        hostname = urlparse(url).hostname
-        if not hostname:
-            return
-        host_queue = host_frontiers.setdefault(hostname, [])
-        heapq.heappush(host_queue, item)
-        if hostname not in scheduled_hosts:
-            host_rotation.append(hostname)
-            scheduled_hosts.add(hostname)
-
-    def pop_host_url(self, host_frontiers, host_rotation, scheduled_hosts):
-        hostname = host_rotation.popleft()
-        scheduled_hosts.remove(hostname)
-        host_queue = host_frontiers[hostname]
-        item = heapq.heappop(host_queue)
-
-        if host_queue:
-            host_rotation.append(hostname)
-            scheduled_hosts.add(hostname)
-        else:
-            del host_frontiers[hostname]
-        return item
-
-    def push_host_url(self, host_frontiers, host_rotation, scheduled_hosts, url, priority):
+    def push_url(self, frontier, url, priority):
         self.sequence += 1
-        item = (-priority, self.sequence, url)
-        self.add_host_item(host_frontiers, host_rotation, scheduled_hosts, item)
-
-    def flatten_host_frontiers(self, host_frontiers):
-        return [item for host_queue in host_frontiers.values() for item in host_queue]
+        heapq.heappush(frontier, (-priority, self.sequence, url))
 
     def wait_for_host(self, url):
         hostname = urlparse(url).hostname
@@ -234,9 +197,7 @@ class Crawler:
         
         start_urls = list(dict.fromkeys(start_urls))
         for url in start_urls:
-            self.sequence += 1
-            item = (-self.calc_priority(url), self.sequence, url)
-            heapq.heappush(frontier, item)
+            self.push_url(frontier, url, self.calc_priority(url))
         return frontier, set(start_urls), dict(), 0
 
 if __name__ == "__main__":
