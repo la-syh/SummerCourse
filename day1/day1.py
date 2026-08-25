@@ -1,6 +1,7 @@
 from bs4 import BeautifulSoup
 import jieba
 from url_normalize import url_normalize
+from urllib.parse import urljoin, urldefrag, urlparse
 
 class ExtractHTML:
     def __init__(self, html_doc):
@@ -15,9 +16,12 @@ class ExtractHTML:
             href = href.strip()
             if href == None or href.lower().startswith('javascript:'):
                 continue
-            if not href.lower().startswith('http'):
-                href = url + href
-            all_links.add(url_normalize(href))
+            abslote_url = urljoin(url, href)
+            abslote_url, _ = urldefrag(abslote_url)
+            parsed = urlparse(abslote_url)
+            if parsed.scheme not in {'http', 'https'}:
+                continue
+            all_links.add(url_normalize(abslote_url))
         return all_links
     # 抓取标题与正文并分词
     def extract_title_and_body_words(self):
