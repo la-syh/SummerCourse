@@ -4,7 +4,8 @@ import json
 import os
 
 class Inverted_index:
-    def __init__(self, url_index, docID_path, inverted_index_path, remake = False):
+    def __init__(self, url_index, docID_path, inverted_index_path, stopwords_path = None, remake = False):
+        self.stopwords = self.load_stopwords(stopwords_path)
         if remake or not os.path.exists(docID_path):  # 新建 docID
             self.make_docID(url_index, docID_path)
         if not remake and os.path.exists(inverted_index_path): # 倒排索引已经被构建过
@@ -45,7 +46,10 @@ class Inverted_index:
                     content = file_reader.read()
                 html = ExtractHTML(content)
                 _, _, _, title_words, doctitle_words, body_words = html.extract_title_and_body_words()
-                for word in title_words + doctitle_words + body_words:
+                for raw_word in title_words + doctitle_words + body_words:
+                    word = raw_word.strip().casefold()
+                    if not word or word in self.stopwords:
+                        continue
                     if docID != self.inverted_index[word][-1]:
                         self.inverted_index[word].append(docID)
     def save_inverted_index(self, inverted_index_path):
@@ -59,7 +63,13 @@ class Inverted_index:
             data = json.load(r)
         self.inverted_index = defaultdict(lambda: [-1], data)
 
-    def query_AND(self, ):
+    def load_stopwords(self, stopwords_path):
+        with open(stopwords_path, 'r', encoding='utf-8') as r:
+            return {line.strip().casefold() for line in r if line.strip()}
+
+    def query(self, word):
+        return self.inverted_index[word]
+    def query_AND(self, word_list):
         pass
     def query_OR(self, ):
         pass
@@ -68,4 +78,6 @@ if __name__ == "__main__":
     url_index = 'downloaded_html/url_index.jsonl'
     docID_path = 'downloaded_html/docID.jsonl'
     inverted_index_path = 'inverted_index/inverted_index.jsonl'
-    index_maker = Inverted_index(url_index, docID_path, inverted_index_path)
+    stopwords_path = 'stopwords.txt'
+    index_maker = Inverted_index(url_index, docID_path, inverted_index_path, 
+                                 stopwords_path=stopwords_path, remake=True)
