@@ -78,7 +78,6 @@ class Inverted_index:
     def intersection(self, l1, l2)-> list[int]:
         result = []
         p1, p2 = iter(l1), iter(l2)
-        doc1, doc2 = next(p1), next(p2)
         try:
             doc1, doc2 = next(p1), next(p2)
             while True:
@@ -95,7 +94,7 @@ class Inverted_index:
 
     def union(self, l1, l2)-> list[int]:
         result = []
-        i, j = 1, 1
+        i, j = 0, 0
         while i < len(l1) and j < len(l2):
             if l1[i] == l2[j]:
                 result.append(l1[i])
