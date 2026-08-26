@@ -64,15 +64,72 @@ class Inverted_index:
         self.inverted_index = defaultdict(lambda: [-1], data)
 
     def load_stopwords(self, stopwords_path):
+        if stopwords_path is None:
+            return set()
         with open(stopwords_path, 'r', encoding='utf-8') as r:
             return {line.strip().casefold() for line in r if line.strip()}
 
-    def query(self, word):
-        return self.inverted_index[word]
-    def query_AND(self, word_list):
-        pass
-    def query_OR(self, ):
-        pass
+    def query(self, word:str)-> list[int]:
+        if not isinstance(word, str):
+            raise TypeError('query 参数必须是字符串')
+        
+        word = word.strip().casefold()
+        return (self.inverted_index.get(word, [-1]))[1:]
+    def query_AND(self, word_list: list[str])-> list[int]:
+        if not isinstance(word_list, list):
+            raise TypeError('query_AND 参数必须是 list')
+        if not all(isinstance(word, str) for word in word_list):
+            raise TypeError('query_AND 中的查询必须都是 str')
+        if not word_list:
+            return []
+        
+        now_list = self.query(word_list[0])
+        for i in range(1, len(word_list)):
+            new_list = []
+            p1, p2 = iter(now_list), iter(self.query(word_list[i]))
+            try:
+                doc1, doc2 = next(p1), next(p2)
+                while True:
+                    if doc1 == doc2:
+                        new_list.append(doc1)
+                        doc1, doc2 = next(p1), next(p2)
+                    elif doc1 < doc2:
+                        doc1 = next(p1)
+                    else:
+                        doc2 = next(p2)
+            except StopIteration:
+                pass
+            now_list = new_list
+            if not now_list:
+                break
+        return now_list
+    def query_OR(self, word_list: list[str])-> list[int]:
+        if not isinstance(word_list, list):
+            raise TypeError('query_OR 参数必须是 list')
+        if not all(isinstance(word, str) for word in word_list):
+            raise TypeError('query_OR 中的查询必须都是 str')
+        if not word_list:
+            return []
+
+        now_list:list[int] = []
+        for word in word_list:
+            posting = self.query(word)
+            merged:list[int] = []
+            i, j = 0, 0
+            while i < len(now_list) and j < len(posting):
+                if now_list[i] == posting[j]:
+                    merged.append(now_list[i])
+                    i, j = i + 1, j + 1
+                elif now_list[i] < posting[j]:
+                    merged.append(now_list[i])
+                    i = i + 1
+                else:
+                    merged.append(posting[j])
+                    j = j + 1
+            merged.extend(now_list[i:])
+            merged.extend(posting[j:])
+            now_list = merged
+        return now_list
 
 if __name__ == "__main__":
     url_index = 'downloaded_html/url_index.jsonl'
@@ -80,4 +137,4 @@ if __name__ == "__main__":
     inverted_index_path = 'inverted_index/inverted_index.jsonl'
     stopwords_path = 'stopwords.txt'
     index_maker = Inverted_index(url_index, docID_path, inverted_index_path, 
-                                 stopwords_path=stopwords_path, remake=True)
+                                 stopwords_path=stopwords_path, remake=False)
