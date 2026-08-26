@@ -27,7 +27,7 @@ class Inverted_index:
         ]
     }
     '''
-    def __init__(self, docID_path, index_path, stopwords_path = None, remake = False):
+    def __init__(self, docID_path, index_path, stopwords_path=None, remake=False):
         self.stopwords = self.load_stopwords(stopwords_path)
         self.document_count = 0
 
@@ -119,9 +119,39 @@ class Inverted_index:
     def idf(self, df):
         return log10(self.document_count / df)
 
-    def query(self, sentence: str):
-        words = self.normalize_words(jieba.lcut_for_search(str))
-        pass
+    def query(self, sentence: str, k = 10):
+        if not isinstance(sentence, str):
+            raise TypeError('sentence 必须是字符串')
+        if not isinstance(k, int):
+            raise TypeError('k 必须是整数')
+        if k <= 0:
+            return []
+
+        query_terms = Counter(term for term in self.normalize_words(jieba.lcut_for_search(sentence)))
+        scores = defaultdict(float)
+        query_length = 0.
+        for term, query_tf in query_terms.items():
+            if term not in self.terms:
+                continue
+            term_data = self.terms[term]
+            idf = term_data['idf']
+            query_weight = self.log_tf(query_tf) * idf
+            if query_weight == 0:
+                continue
+            query_length += query_weight ** 2
+            for posting in term_data['postings']:
+                doc_weight = self.log_tf(posting['tf']) * idf
+                scores[posting['docID']] += query_weight * doc_weight
+        query_length = sqrt(query_length)
+        if query_length == 0:
+            return []
+
+        results:list[tuple[int, float]] = [(docid, score / self.doc_lengths[docid] / query_length)
+                                            for docid, score in scores.items() 
+                                            if self.doc_lengths[docid] != 0]
+        results.sort(key=lambda x: x[1], reverse=True)
+        return results[:k]
+
 
 if __name__ == "__main__":
     docID_path = 'downloaded_html/docID.jsonl'
