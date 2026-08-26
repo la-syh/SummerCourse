@@ -98,7 +98,7 @@ class Inverted_index:
         }
         try:
             with open(temp_path, 'w', encoding='utf-8') as file_writer:
-                json.dump(state, file_writer)
+                json.dump(state, file_writer, ensure_ascii=False)
             os.replace(temp_path, index_path)
         except Exception as error:
             print(f'保存失败, 原因: {error}')
@@ -157,4 +157,4 @@ if __name__ == "__main__":
     docID_path = 'downloaded_html/docID.jsonl'
     index_path = 'inverted_index/inverted_index.json'
     stopwords_path = 'stopwords.txt'
-    tester = Inverted_index(docID_path, index_path, stopwords_path, remake=True)
+    tester = Inverted_index(docID_path, index_path, stopwords_path, remake=False)
