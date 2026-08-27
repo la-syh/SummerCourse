@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>Result</title>
+  </head>
+  <body>
+    <div>
+      <p>Keys: {{ key }}</p>
+      <br>
+      <div>
+        {% for res in results %}
+          <p>
+            <a href="{{ res['url'] }}">{{ res['title'] }}</a>
+          </p>
+          <p>
+            {{ res['abstract'] }}
+          </p>
+          <br>
+        {% endfor %}
+      </div>
+    </div>
+  </body>
+</html>
