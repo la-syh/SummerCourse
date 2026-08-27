@@ -11,7 +11,7 @@ class Inverted_index:
     {
         "document_count": 15947,
         "docID2url": {
-            0: "https://clr.ruc.edu.cn/"
+            '0': "https://clr.ruc.edu.cn/"
             ... 
         }
         "terms": {
@@ -171,7 +171,7 @@ class Inverted_index:
                                             for docid, score in scores.items() 
                                             if self.doc_lengths[docid] != 0]
         results.sort(key=lambda x: x[1], reverse=True)
-        return [self.docID2url[docID] for docID, score in results[:k]]
+        return [self.docID2url[str(docID)] for docID, score in results[:k]]
 
 
 if __name__ == "__main__":
