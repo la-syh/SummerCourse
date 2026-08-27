@@ -10,6 +10,10 @@ class Inverted_index:
     '''
     {
         "document_count": 15947,
+        "docID2url": {
+            0: "https://clr.ruc.edu.cn/"
+            ... 
+        }
         "terms": {
             "人工智能": {
                 "df": 120,
@@ -30,6 +34,7 @@ class Inverted_index:
     def __init__(self, docID_path, index_path, stopwords_path=None, remake=False):
         self.stopwords = self.load_stopwords(stopwords_path)
         self.document_count = 0
+        self.docID2url = dict()
 
         if not remake and os.path.exists(index_path):
             self.load_index(index_path)
@@ -61,6 +66,7 @@ class Inverted_index:
                 state = json.loads(line)
                 docID, url, file = state['docID'], state['url'], state['file']
                 self.document_count += 1
+                self.docID2url[docID] = url
                 with open(file, 'r', encoding='utf-8') as file_reader:
                     content = file_reader.read()
                 html = ExtractHTML(content)
@@ -94,7 +100,8 @@ class Inverted_index:
         state = {
             'document_count': self.document_count,
             'terms': self.terms,
-            'doc_lengths': self.doc_lengths
+            'doc_lengths': self.doc_lengths,
+            'docID2url': self.docID2url
         }
         try:
             with open(temp_path, 'w', encoding='utf-8') as file_writer:
@@ -110,6 +117,7 @@ class Inverted_index:
             self.document_count = state['document_count']
             self.terms = state['terms']
             self.doc_lengths = state['doc_lengths']
+            self.docID2url = state['docID2url']
         except Exception as error:
             print(f'读取 {index_path} 失败, 原因: {error}')
             raise
@@ -150,7 +158,7 @@ class Inverted_index:
                                             for docid, score in scores.items() 
                                             if self.doc_lengths[docid] != 0]
         results.sort(key=lambda x: x[1], reverse=True)
-        return results[:k]
+        return [self.docID2url[docID] for docID, score in results[:k]]
 
 
 if __name__ == "__main__":
@@ -158,3 +166,10 @@ if __name__ == "__main__":
     index_path = 'inverted_index/inverted_index.json'
     stopwords_path = 'stopwords.txt'
     tester = Inverted_index(docID_path, index_path, stopwords_path, remake=False)
+    try:
+        while True:
+            question = input()
+            print(tester.query(question))
+            print('')
+    except KeyboardInterrupt:
+        pass

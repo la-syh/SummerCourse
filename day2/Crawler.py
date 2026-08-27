@@ -24,6 +24,7 @@ class Crawler:
             self.html_dir,
             "url_index.jsonl",
         )
+        self.saved_urls = self.load_saved_urls()
         self.headers = {'user-agent': 'my-app/0.0.1'}
         self.checkpoint_file = checkpoint_file
         self.sequence = 0   # 优先队列历史元素数
@@ -64,22 +65,30 @@ class Crawler:
                 print(f'[{count} / {self.max_count}] '
                     f'正在访问 {url}', flush=True)
                 self.wait_for_host(url)
-                html = self.get_html(url, headers=self.headers, timeout=(3, 5))
+                result = self.get_html(url, headers=self.headers, timeout=(3, 5))
                 self.record_host_fetch(url)
-                if html is not None:
-                    self.save_html(url, html)
-                    links = ExtractHTML(html).extract_links(url)
-                    for new_url in links:
-                        if self.is_ignored_file(new_url):
-                            print(f'跳过文件 {new_url}')
-                            continue
-                        if new_url in self.all_links or urlparse(new_url).hostname not in hostnames:
-                            continue
-                        self.all_links.add(new_url)
-                        self.push_host_url(
-                            host_frontiers, host_rotation, scheduled_hosts,
-                            new_url, self.calc_priority(new_url, url)
-                        )
+                if result is not None:
+                    html, final_url = result
+                    if urlparse(final_url).hostname not in hostnames:
+                        print(f'跳过重定向到站外的页面: {final_url}')
+                    else:
+                        self.all_links.add(final_url)
+                        if final_url not in self.saved_urls:
+                            self.save_html(final_url, html)
+                            self.saved_urls.add(final_url)
+                            links = ExtractHTML(html).extract_links(final_url)
+                            
+                            for new_url in links:
+                                if self.is_ignored_file(new_url):
+                                    print(f'跳过文件 {new_url}')
+                                    continue
+                                if new_url in self.all_links or urlparse(new_url).hostname not in hostnames:
+                                    continue
+                                self.all_links.add(new_url)
+                                self.push_host_url(
+                                    host_frontiers, host_rotation, scheduled_hosts,
+                                    new_url, self.calc_priority(new_url, final_url)
+                                    )
                 if count % self.save_interval == 0:
                     self.save_checkpoint(self.flatten_host_frontiers(host_frontiers), count)
                     remaining_count = sum(len(host_queue) for host_queue in host_frontiers.values())
@@ -103,7 +112,7 @@ class Crawler:
                         and 'application/xhtml+xml' not in content_type):
                     print(f'跳过非 HTML 内容：{uri} ({content_type})')
                     return None
-                return response.content
+                return response.content, response.url
         except requests.RequestException as error:
             print(f'访问失败: {uri}, 原因: {error}')
             return None
@@ -317,6 +326,30 @@ class Crawler:
 
         self.redirect_recovery_version = 1
         print(f'从已保存 HTML 中恢复 {recovered_count} 个跳转目标')
+    def load_saved_urls(self):
+        saved_urls = set()
+
+        if not os.path.exists(self.url_index_file):
+            return saved_urls
+
+        try:
+            with open(
+                self.url_index_file,
+                'r',
+                encoding='utf-8',
+            ) as index_file:
+                for line in index_file:
+                    try:
+                        record = json.loads(line)
+                        url = record.get('url')
+                        if isinstance(url, str):
+                            saved_urls.add(url)
+                    except json.JSONDecodeError:
+                        continue
+        except OSError as error:
+            print(f'读取已保存 URL 失败: {error}')
+
+        return saved_urls
 
 if __name__ == "__main__":
     start_urls = [

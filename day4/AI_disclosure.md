@@ -216,6 +216,62 @@ w_{t,d}=\left(1+\log_{10}(tf_{t,d})\right)idf_t.
 
 第二，当前代码已计算并开方得到查询向量长度，但最终得分仍然只除以文档长度。若要返回完整余弦相似度，还需要同时除以查询向量长度。省略它不会改变同一查询下的文档排序，但返回数值不是完整的余弦值。
 
+### 13. 排查教师列表页中的相对链接是否漏爬
+
+我在 Day 4 测试中怀疑爬虫没有从 `http://ai.ruc.edu.cn/academicfaculty/szdwn/index.htm` 发现 `wjr/index.htm`，因而没有抓取文继荣老师的中文个人页。AI 对本地抓取数据、HTML、docID 映射和 Day 4 索引进行了逐层检查。
+
+检查结果表明，该页面并未漏爬：
+
+- 教师列表页已保存，对应 docID 9183；
+- 本地保存的列表页 HTML 中确实包含 `href="wjr/index.htm"` 的姓名链接和“中文”按钮链接；
+- 以列表页 URL 为基址调用 `urljoin()`，可正确得到 `http://ai.ruc.edu.cn/academicfaculty/szdwn/wjr/index.htm`；
+- 目标页已出现在 `url_index.jsonl` 和 `docID.jsonl` 中，对应 docID 2503；
+- 目标 HTML 文件已保存到本地，其标题、一级标题和正文包含“文继荣”和“信息检索”等内容；
+- Day 4 索引的“文继荣”词项 postings 中同时包含目标页 docID 2503 和列表页 docID 9183；
+- 两篇文档都已计算出非零 tf-idf 向量长度。
+
+AI 进一步按当前 tf-idf 余弦公式对“文继荣”进行单词排名核对。目标个人页 docID 2503 中该词的 \(tf=3\)，余弦得分约为 0.0866，在候选文档中排名第 68；列表页 docID 9183 排名第 505。因此，默认只返回 Top 10 时不会看到目标页，这是排名和截断结果，不是爬取或建索引失败。
+
+AI 还说明，当前文本索引只提取 `title`、`h1`至 `h3` 和 `p` 中的文字，不会把链接 URL 或所有锚文本作为目标文档的内容，链接关系本身也不会在当前向量空间模型中产生排名加成。
+
+### 14. 更正目标页面并检查重定向 URL 的记录
+
+我随后更正说明，实际怀疑缺失的页面是 `https://gsai.ruc.edu.cn/addons/teacher/index.html`，而不是上一节检查的文继荣个人页。AI 重新检查了本地的 `url_index.jsonl`、`docID.jsonl` 和已保存 HTML，并联网核对了 URL 的跳转结果。
+
+检查发现，精确 URL `https://gsai.ruc.edu.cn/addons/teacher/index.html` 的确没有出现在本地 URL 索引和 docID 映射中，但该页面的 HTML 内容已经抓取并保存在 `https://gsai.ruc.edu.cn` 对应的文件中，文件标题为“教师主页系统”，正文中也包含教师列表及各教师主页链接。
+
+原因是访问种子 URL `https://gsai.ruc.edu.cn` 时，网站会经过一次 HTTP 重定向，最终到达 `https://gsai.ruc.edu.cn/addons/teacher/index.html`。当前爬虫的 `requests.get()` 会自动跟随重定向，但 `get_html()` 只返回响应正文；之后 `save_html(url, html)` 仍使用请求前的原始 URL 生成文件名和索引记录，没有保存最终响应 URL `response.url`。所以这是重定向后的规范 URL 没有被记录，不是页面内容没有下载。
+
+AI 建议若要让 URL 索引准确反映最终地址，应让下载函数同时返回 HTML 与最终 URL，并在保存、去重和链接基址处理中统一考虑最终 URL。若作业只要求网页内容能够参与倒排索引和检索，当前该教师列表页的内容已经进入语料；若还要求 URL 映射准确，则需要再修正重定向处理逻辑。
+
+### 15. 排查 HTTP 与 HTTPS 页面重复收录
+
+我发现同一页面可能同时以 HTTP 和 HTTPS 两种地址进入语料，例如 `http://gsai.ruc.edu.cn/addons/video/video/play.html?id=2` 和对应的 HTTPS 地址。AI 检查本地 `url_index.jsonl` 与 `docID.jsonl` 后确认，这两个地址分别保存为不同文件，并分别获得 docID 3037 和 1635。按主机名、路径和查询参数相同而仅协议不同的条件统计，`gsai.ruc.edu.cn` 中共有 107 组此类记录。
+
+AI 联网核对示例地址后确认，HTTP 地址会经过一次重定向，最终到达相同的 HTTPS 地址，而直接访问 HTTPS 地址不会发生重定向。因此这些记录在语义上是同一页面的重复抓取。出现重复的原因仍是爬虫只根据抓取前的 URL 字符串维护 `all_links`、生成文件名和写入 URL 索引，没有使用服务器响应中的最终 URL `response.url` 进行规范化和去重。
+
+AI 不建议无条件把所有网站的 HTTP 地址改写成 HTTPS，因为并非所有主机都保证两种协议可用且内容等价。更稳妥的方案是让下载函数返回响应正文和最终 URL，将最终 URL 规范化后用于保存、解析相对链接和已保存页面去重，并维护原始 URL 到最终 URL 的重定向关系。对于现有数据，若清除重复记录，还需要重新生成连续的 docID 映射并重建 Day 4 倒排索引，不能只删除一个 HTML 文件或一行 URL 记录。
+
+### 16. 检查下载函数返回最终 URL 后的配套修改
+
+我将 `get_html()` 的成功返回值改为 `(response.content, response.url)`，并询问其他位置还需要如何调整。AI 检查当前代码后指出，调用处仍把整个返回值赋给 `html`，随后传给 `save_html()` 和 `ExtractHTML()`；若直接运行，写文件时会因为传入元组而不是字节串报错。
+
+AI 建议在主循环中先判断下载结果是否为 `None`，再解包为 `html, final_url`，并统一使用 `final_url` 保存页面、解析相对链接和计算子链接优先级。同时应验证重定向后的主机名仍属于允许抓取的主机集合，避免 `requests` 自动跟随重定向后保存站外页面。
+
+仅把最终 URL 加入现有 `all_links` 仍不足以可靠去重，因为 `all_links` 表示链接已经被发现或加入队列，并不表示页面已经成功下载。AI 建议另设 `saved_urls` 集合，从已有 `url_index.jsonl` 恢复，并在每次成功保存后更新。请求得到的 `final_url` 如果已经在 `saved_urls` 中，应跳过重复保存；从队列取出的 URL 如果已保存，也可以在发起请求前跳过。该修改只能防止以后新增重复，现有的 HTTP/HTTPS 重复记录仍需单独清理并重新生成 docID 和 Day 4 索引。
+
+### 17. 复查重定向去重修改并安排后续步骤
+
+我完成配套修改后询问下一步。AI 对当前 `Crawler.py` 进行了差异检查和静态编译检查。代码语法可以通过编译，但发现 `self.saved_urls = self.load_saved_urls()` 被放在 `self.url_index_file` 初始化之前；调用 `load_saved_urls()` 时访问该属性会触发 `AttributeError`，因此需要将该语句移动到 `url_index_file` 赋值之后。
+
+AI 还指出，当前在下载失败、重定向到站外或最终 URL 已保存时直接执行 `continue`，会跳过循环末尾按 `save_interval` 执行的断点保存。建议调整控制流，使这些情况不绕过定期保存逻辑，或者把定期保存封装为不会被提前跳过的步骤。另外可以在发起请求前检查队列 URL 是否已经位于 `saved_urls`，从而减少不必要的重复请求。
+
+AI 建议修正后先使用 HTTP/HTTPS 两个示例地址和独立的临时 HTML 目录、临时断点文件进行小规模测试，确认最终只写入一个 HTTPS URL，再决定如何处理正式数据。现有正式断点的 frontier 已为空，直接使用旧目录和旧断点运行不会自动删除或重新整理旧的重复数据；若需要完全干净的语料，应先备份旧结果，再重新抓取，之后重新生成 docID 并重建 Day 4 索引。
+
+### 18. 确认重新抓取的启动方式
+
+我确认备份完成后是否可以直接运行 `python -m day2.Crawler`。AI 说明，在前述初始化顺序和断点保存控制流问题修正后，应同时备份并移走原来的 `downloaded_html` 目录与 `crawler_checkpoint.json`，然后从 `hw` 目录进入 `conda ML` 环境运行该模块。这样爬虫会因找不到旧断点和旧 URL 索引而从种子 URL 重新开始，并创建新的抓取目录与索引。AI 同时建议先完成两网址的小规模测试，再开始耗时较长的完整抓取。
+
 ## 三、AI 建议的采纳情况
 
 目前已采纳的建议包括：
