@@ -71,13 +71,24 @@ class Inverted_index:
                     content = file_reader.read()
                 html = ExtractHTML(content)
                 _, _, _, title_words, doctitle_words, body_words = html.extract_title_and_body_words()
-                words = self.normalize_words(title_words + doctitle_words + body_words)
-                term_counts = Counter(words)
+                # words = self.normalize_words(title_words + doctitle_words + body_words)
+                # term_counts = Counter(words)
+                title_counts = Counter(self.normalize_words(title_words))
+                doctitle_counts = Counter(self.normalize_words(doctitle_words))
+                body_counts = Counter(self.normalize_words(body_words))
+                all_terms = (set(title_counts) | set(doctitle_counts) | set(body_counts))
 
-                for word, tf in term_counts.items():
+                for word in all_terms:
+                    tf = title_counts[word] + doctitle_counts[word] + body_counts[word]
+                    weighted_tf = 3 * title_counts[word] + 2 * doctitle_counts[word] + 1 * body_counts[word]
                     term_data = self.terms.setdefault(word, {'df': 0, 'postings': []})
                     term_data['df'] += 1
-                    term_data['postings'].append({'docID': docID, 'tf': tf})
+                    term_data['postings'].append({'docID': docID, 'tf': tf, 'weighted_tf': weighted_tf})
+
+                # for word, tf in term_counts.items():
+                #     term_data = self.terms.setdefault(word, {'df': 0, 'postings': []})
+                #     term_data['df'] += 1
+                #     term_data['postings'].append({'docID': docID, 'tf': tf})
             for term_data in self.terms.values():
                 term_data['idf'] = self.idf(term_data['df']);
     def calc_doc_lengths(self):
@@ -85,7 +96,8 @@ class Inverted_index:
         for term_data in self.terms.values():
             for posting in term_data['postings']:
                 docID = posting['docID']
-                tf = posting['tf']
+                # tf = posting['tf']
+                tf = posting['weighted_tf']
 
                 weight = self.log_tf(tf) * term_data['idf']
                 self.doc_lengths[docID] += weight ** 2
@@ -148,7 +160,8 @@ class Inverted_index:
                 continue
             query_length += query_weight ** 2
             for posting in term_data['postings']:
-                doc_weight = self.log_tf(posting['tf']) * idf
+                # doc_weight = self.log_tf(posting['tf']) * idf
+                doc_weight = self.log_tf(posting['weighted_tf']) * idf
                 scores[posting['docID']] += query_weight * doc_weight
         query_length = sqrt(query_length)
         if query_length == 0:
