@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -8,6 +9,10 @@ from bs4 import BeautifulSoup
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DOC_ID_PATH = PROJECT_ROOT / "downloaded_html" / "docID.jsonl"
 OUTPUT_PATH = PROJECT_ROOT / "inverted_index" / "page_metadata.jsonl"
+
+GENERIC_ABSTRACTS = {
+    "新首页_中国人民大学高瓴人工智能学院",
+}
 
 
 def clean_text(text: str) -> str:
@@ -47,6 +52,28 @@ def extract_page_info(html_path: Path, url: str) -> dict:
     if not title:
         title = url
 
+    # 提取 h1、h2、h3，并保留第一个标题用于摘要回退
+    heading_nodes = soup.find_all(["h1", "h2", "h3"])
+    headings = clean_text(
+        " ".join(
+            node.get_text(" ", strip=True)
+            for node in heading_nodes
+        )
+    )
+    first_heading = (
+        clean_text(heading_nodes[0].get_text(" ", strip=True))
+        if heading_nodes
+        else ""
+    )
+
+    # 提取段落正文
+    body_text = clean_text(
+        " ".join(
+            node.get_text(" ", strip=True)
+            for node in soup.find_all("p")
+        )
+    )
+
     abstract = get_meta_content(
         soup,
         [
@@ -57,18 +84,24 @@ def extract_page_info(html_path: Path, url: str) -> dict:
         ],
     )
 
-    # 页面没有 description 时，用正文前 200 个字符作为摘要
-    if not abstract:
-        paragraphs = [
-            node.get_text(" ", strip=True)
-            for node in soup.find_all("p")
-        ]
-        body_text = clean_text(" ".join(paragraphs))
-        abstract = body_text[:200]
+    # 忽略所有视频页共用的站点级描述。优先使用正文；正文为空的
+    # 视频页则使用第一个页面标题，避免所有结果显示相同摘要。
+    if not abstract or abstract in GENERIC_ABSTRACTS:
+        abstract = body_text[:200] or first_heading
+
+    # 对实际用于检索的文字计算内容指纹
+    searchable_text = clean_text(
+        title + " " + headings + " " + body_text
+    )
+
+    content_hash = hashlib.sha256(
+        searchable_text.encode("utf-8")
+    ).hexdigest()
 
     return {
         "title": title,
         "abstract": abstract,
+        "content_hash": content_hash,
     }
 
 

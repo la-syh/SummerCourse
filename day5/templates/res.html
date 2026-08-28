@@ -51,12 +51,12 @@
               target="_blank"
               rel="noopener noreferrer"
             >
-              {{ res['title'] }}
+              {{ res['title'] | highlight(key) }}
             </a>
 
             <p class="result-url">{{ res['url'] }}</p>
             <p class="result-abstract">
-              {{ res['abstract'] }}
+              {{ res['abstract'] | highlight(key) }}
             </p>
           </article>
         {% endfor %}

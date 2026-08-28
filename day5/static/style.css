@@ -160,6 +160,13 @@ a {
   line-height: 1.7;
 }
 
+.query-highlight {
+  padding: 0;
+  color: #d93025;
+  background: transparent;
+  font-weight: 700;
+}
+
 .empty-state {
   padding: 60px 24px;
   color: var(--muted);
