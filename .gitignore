@@ -10,4 +10,3 @@ crawler_checkpoint.json.tmp
 crawled_links
 inverted_index/
 stopwords.txt
-students_evaluation/
