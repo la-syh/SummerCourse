@@ -1,4 +1,4 @@
-from day1.ExtractHTML import ExtractHTML
+from ruc_search.extractor import ExtractHTML
 from bs4 import BeautifulSoup
 from collections import deque
 import os

@@ -1,3 +1,5 @@
+"""从本地 HTML 离线生成搜索结果页面元数据。"""
+
 import hashlib
 import json
 import re

@@ -1,4 +1,4 @@
-from day1.ExtractHTML import ExtractHTML
+from .extractor import ExtractHTML
 import requests
 import heapq
 import time
@@ -7,6 +7,10 @@ import json
 import os
 import hashlib
 from collections import deque
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 class Crawler:
     def __init__(self, start_urls, wait_time=5., max_count = 200_000, 
@@ -370,4 +374,10 @@ if __name__ == "__main__":
         'https://gsai.ruc.edu.cn'
     ]
     crawl_tester = Crawler(start_urls=start_urls, wait_time=1,
-                           max_count=200000)
+                           max_count=200000,
+                           checkpoint_file=str(
+                               PROJECT_ROOT / 'crawler_checkpoint.json'
+                           ),
+                           html_dir=str(
+                               PROJECT_ROOT / 'downloaded_html'
+                           ))

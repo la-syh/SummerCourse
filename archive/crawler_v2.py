@@ -1,4 +1,4 @@
-from day1.ExtractHTML import ExtractHTML
+from ruc_search.extractor import ExtractHTML
 import requests
 import heapq
 import time

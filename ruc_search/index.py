@@ -1,9 +1,10 @@
-from day1.ExtractHTML import ExtractHTML
+from .extractor import ExtractHTML
 from collections import defaultdict
 from collections import Counter
 from math import log10, sqrt
 import json
 import os
+from pathlib import Path
 import jieba
 
 class Inverted_index:
@@ -61,13 +62,17 @@ class Inverted_index:
         return result
     def build_index(self, docID_path):
         # init self.terms
+        project_root = Path(docID_path).resolve().parent.parent
         with open(docID_path, 'r', encoding='utf-8') as docID_reader:
             for line in docID_reader:
                 state = json.loads(line)
                 docID, url, file = state['docID'], state['url'], state['file']
                 self.document_count += 1
                 self.docID2url[docID] = url
-                with open(file, 'r', encoding='utf-8') as file_reader:
+                file_path = Path(file)
+                if not file_path.is_absolute():
+                    file_path = project_root / file_path
+                with file_path.open('r', encoding='utf-8') as file_reader:
                     content = file_reader.read()
                 html = ExtractHTML(content)
                 _, _, _, title_words, doctitle_words, body_words = html.extract_title_and_body_words()
@@ -175,14 +180,20 @@ class Inverted_index:
 
 
 if __name__ == "__main__":
-    docID_path = 'downloaded_html/docID.jsonl'
-    index_path = 'inverted_index/inverted_index.json'
-    stopwords_path = 'stopwords.txt'
-    tester = Inverted_index(docID_path, index_path, stopwords_path, remake=False)
+    project_root = Path(__file__).resolve().parents[1]
+    docID_path = project_root / 'downloaded_html' / 'docID.jsonl'
+    index_path = project_root / 'inverted_index' / 'inverted_index.json'
+    stopwords_path = project_root / 'stopwords.txt'
+    tester = Inverted_index(
+        str(docID_path),
+        str(index_path),
+        str(stopwords_path),
+        remake=False,
+    )
     try:
         while True:
             question = input()
             print(tester.query(question))
             print('')
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, EOFError):
         pass
