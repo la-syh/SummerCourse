@@ -20,7 +20,7 @@ else:
 
 
 # 请替换为助教提供的评测服务器地址，并保留末尾斜杠。
-base_url = "http://10.47.253.18:8080/"
+base_url = "https://acids-bills-geometry-cricket.trycloudflare.com/"
 
 
 def input_idx() -> str:
@@ -72,7 +72,7 @@ def send_ans(
     idx: str,
     passwd: str,
     urls: list[list[str]],
-    elapsed_seconds: list[float],
+    elapsed_milliseconds: list[float],
 ) -> tuple[str, float, float]:
     response = requests.post(
         urljoin(base_url, "mrr"),
@@ -80,7 +80,7 @@ def send_ans(
             "idx": idx,
             "passwd": passwd,
             "urls": json.dumps(urls),
-            "elapsed_seconds": json.dumps(elapsed_seconds),
+            "elapsed_milliseconds": json.dumps(elapsed_milliseconds),
         },
         timeout=180,
     )
@@ -91,7 +91,7 @@ def send_ans(
         raise RuntimeError(data.get("message", "评测服务器错误"))
 
     mode, mrr = data.get("mode"), data.get("mrr")
-    average_latency = data.get("average_latency_seconds")
+    average_latency = data.get("average_latency_milliseconds")
     if (
         not isinstance(mode, str)
         or not isinstance(mrr, (int, float))
@@ -108,26 +108,26 @@ def main() -> None:
 
     # 不要在正式评测时打印 queries 或 passwd。
     all_urls: list[list[str]] = []
-    elapsed_seconds: list[float] = []
+    elapsed_milliseconds: list[float] = []
     for query in queries:
         started = time.monotonic()
-        result = evaluate(query)
-        elapsed = time.monotonic() - started
-        if not isinstance(result, list) or not all(
-            isinstance(url, str) for url in result
+        urls = evaluate(query)
+        latency_ms = (time.monotonic() - started) * 1000
+        if not isinstance(urls, list) or not all(
+            isinstance(url, str) for url in urls
         ):
-            raise TypeError("evaluate(query) 必须返回由 URL 字符串组成的列表")
-        all_urls.append(result[:20])
-        elapsed_seconds.append(round(elapsed, 3))
+            raise TypeError("evaluate(query) 必须返回 URL 字符串列表")
+        all_urls.append(urls[:20])
+        elapsed_milliseconds.append(round(latency_ms, 3))
 
     mode, mrr, average_latency = send_ans(
         idx,
         passwd,
         all_urls,
-        elapsed_seconds,
+        elapsed_milliseconds,
     )
     print(f"MRR@20: [{mrr}], [{mode}] mode")
-    print(f"Average latency: {average_latency:.3f}s/query")
+    print(f"Average latency: {average_latency:.3f}ms/query")
 
 
 if __name__ == "__main__":

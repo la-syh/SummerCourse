@@ -17,7 +17,7 @@ from search_engine import rag_evaluate
 
 
 # 请替换为助教提供的评测服务器地址，并保留末尾斜杠。
-base_url = "http://10.47.253.18:8080/"
+base_url = "https://acids-bills-geometry-cricket.trycloudflare.com/"
 
 
 def _parse_response(response: requests.Response) -> dict[str, Any]:
@@ -129,12 +129,7 @@ def main() -> None:
         try:
             answer = rag_evaluate(query)
         except Exception as exc:
-            # 同时保留服务端的错误原因，便于区分模型名、参数、
-            # 余额或限流问题。OpenAI SDK 的异常文本不包含 API Key。
-            print(
-                f"RAG question {number} failed: "
-                f"{type(exc).__name__}: {exc}"
-            )
+            print(f"RAG question {number} failed: {type(exc).__name__}")
             answer = ""
         elapsed = time.monotonic() - started
 
