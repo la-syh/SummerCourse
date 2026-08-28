@@ -7,11 +7,10 @@ from math import log2
 from pathlib import Path
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-
+from bs4 import BeautifulSoup
 import jieba
 
 from .index import Inverted_index
-
 
 def get_result_family(url: str) -> str | None:
     """返回需要限制数量的结果族。"""
@@ -124,10 +123,97 @@ class SearchService:
             url: int(doc_id)
             for doc_id, url in self.search_engine.docID2url.items()
         }
+        self.url_to_html_path = {}
+        doc_id_path = (
+            self.project_root
+            / "downloaded_html"
+            / "docID.jsonl"
+        )
+        with doc_id_path.open("r", encoding="utf-8") as reader:
+            for line in reader:
+                record = json.loads(line)
+
+                url = record["url"]
+                html_path = Path(record["file"])
+
+                if not html_path.is_absolute():
+                    html_path = self.project_root / html_path
+
+                self.url_to_html_path[url] = html_path
 
     def get_page_info(self, url: str) -> dict:
         """返回一个 URL 的展示元数据。"""
         return self.page_metadata.get(url, {})
+    def get_page_content(
+        self,
+        url: str,
+        max_chars: int | None = None,
+    ) -> str:
+        """读取本地 HTML，返回清洗后的正文。"""
+        html_path = self.url_to_html_path.get(url)
+
+        if html_path is None or not html_path.exists():
+            return ""
+
+        try:
+            html = html_path.read_bytes()
+        except OSError:
+            return ""
+
+        soup = BeautifulSoup(html, "html.parser")
+
+        # 删除不会作为正文使用的内容
+        for node in soup.find_all(
+            [
+                "script",
+                "style",
+                "noscript",
+                "template",
+                "svg",
+                "nav",
+                "footer",
+            ]
+        ):
+            node.decompose()
+
+        # 优先寻找常见正文容器
+        selectors = [
+            "article",
+            "main",
+            ".article-content",
+            ".article_content",
+            ".detail",
+            ".content",
+            ".v_news_content",
+            ".TRS_Editor",
+            ".zi",
+        ]
+
+        content_nodes = []
+
+        for selector in selectors:
+            content_nodes.extend(soup.select(selector))
+
+        if content_nodes:
+            # 选择文字最多的容器，避免选到小型侧边栏
+            content_root = max(
+                content_nodes,
+                key=lambda node: len(
+                    node.get_text(" ", strip=True)
+                ),
+            )
+        else:
+            content_root = soup.body or soup
+
+        content = content_root.get_text(" ", strip=True)
+
+        # 合并换行、制表符和连续空格
+        content = re.sub(r"\s+", " ", content).strip()
+
+        if max_chars is not None:
+            content = content[:max_chars]
+
+        return content
 
     def rerank_candidates(
         self,
