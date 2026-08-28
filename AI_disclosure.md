@@ -712,6 +712,12 @@ AI 说明，虽然再次分词时部分中文模型可能仍能得到相近 toke
 
 AI 建议按数据生命周期而不是按文件扩展名组织目录：抓取的 HTML 和 `docID.jsonl` 属于原始语料；`page_metadata.jsonl` 和 `chunks.jsonl` 属于可重建的处理产物；倒排索引和 `.npy` 向量属于索引产物；只有页面前端确实需要公开请求的小型 JSON 才应放入 Web `static/`。如果只是想表示“固定生成的数据”，使用 `data/`、`artifacts/` 或 `indexes/` 等名称比 `static/` 更清晰。本轮只提供目录设计建议，没有移动或删除任何数据文件。
 
+#### 49. 验证全库 chunk 与 Embedding 产物
+
+我完成了 Embedding 构建并将相关数据产物整理到 `data/` 目录。AI 对 `docID.jsonl`、`chunks.jsonl`、`chunk_embeddings.npy` 和本地 HTML 进行了只读完整性检查。结果显示，15886 个网页共生成 75778 个 chunk；向量矩阵形状为 `(75778, 512)`、类型为 `float32`、体积约 148 MiB，行数与 chunk 数完全一致。
+
+AI 遍历了全部 chunk 元数据，确认 `chunk_id` 从 0 起连续递增，没有发现 ID 与行号不一致的记录；每条记录均包含 `doc_id`、URL、标题、token 起止位置、字符起止位置和原文。前 20 个 chunk 中的中文逐字空格问题已基本消失，说明基于 `offset_mapping` 的原文切片已生效。AI 还抽查了向量矩阵的首行、中间行和末行，向量范数均为 1，且所有数值均为有限值；`docID.jsonl` 中抽查的相对 HTML 路径也能够从项目根目录正确解析。这表明当前数据已满足实现 chunk 向量检索的基本一致性要求。本轮没有重新编码、删除或覆盖任何数据文件。
+
 ### 三、AI 建议的采纳与待处理情况
 
 目前已采纳的建议包括：

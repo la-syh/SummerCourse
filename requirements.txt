@@ -1,6 +1,5 @@
-beautifulsoup4
-Flask
-html5lib
-jieba
+numpy
 requests
+resiliparse
+sentence-transformers
 url-normalize

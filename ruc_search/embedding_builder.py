@@ -1,8 +1,10 @@
-from .page_content import extract_page_content
-from sentence_transformers import SentenceTransformer
-from pathlib import Path
-import numpy as np
 import json
+from pathlib import Path
+
+import numpy as np
+from sentence_transformers import SentenceTransformer
+
+from .page_content import extract_page_content
 
 '''
 chunk 0: tokens   0 ~ 383
@@ -42,8 +44,6 @@ def split_text_to_chunks(
     chunks = []
     for chunk_index, start in enumerate(range(0, len(token_ids), step)):
         end = min(start + chunk_tokens, len(token_ids))
-        current_ids = token_ids[start:end]
-
         char_start, char_end = offsets[start][0], offsets[end - 1][1]
         chunk_text = text[char_start:char_end].strip()
 
@@ -61,9 +61,10 @@ def split_text_to_chunks(
     
     return chunks
 
+
 def build_embedding(
         project_root: Path,
-        docID_path: Path,
+        doc_id_path: Path,
         chunk_path: Path,
         embedding_path: Path,
         model: SentenceTransformer,
@@ -72,47 +73,41 @@ def build_embedding(
     all_chunks = []
     chunk_id = 0
 
-    with open(docID_path, 'r', encoding='utf-8') as docID_reader:
-        for line in docID_reader:
-            state = json.loads(line)
-            file_path = Path(state['file'])
-            if not file_path.is_absolute():
-                file_path = project_root / file_path
-            title, content = extract_page_content(file_path)
-
-            chunks = split_text_to_chunks(content, tokenizer=model.tokenizer, 
-                                          chunk_tokens=chunk_tokens, overlap_tokens=overlap_tokens)
+    with doc_id_path.open(encoding="utf-8") as reader:
+        for line in reader:
+            document = json.loads(line)
+            title, content = extract_page_content(
+                project_root / document["file"]
+            )
+            chunks = split_text_to_chunks(
+                content,
+                model.tokenizer,
+                chunk_tokens,
+                overlap_tokens,
+            )
             for chunk in chunks:
                 all_chunks.append({
-                    'chunk_id': chunk_id,
-                    'doc_id': state['docID'],
-                    'url': state['url'],
-                    'title': title,
-                    **chunk
+                    "chunk_id": chunk_id,
+                    "doc_id": document["docID"],
+                    "url": document["url"],
+                    "title": title,
+                    **chunk,
                 })
                 chunk_id += 1
 
-    chunk_path.parent.mkdir(parents=True, exist_ok=True)
-    embedding_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(chunk_path, 'w', encoding='utf-8') as chunk_writer:
+    with chunk_path.open("w", encoding="utf-8") as chunk_writer:
         for chunk in all_chunks:
             json.dump(chunk, chunk_writer, ensure_ascii=False)
-            chunk_writer.write('\n')
-    texts = [chunk['text'] for chunk in all_chunks]
-    embeddings = model.encode(texts, batch_size=32, show_progress_bar=True,
-                              convert_to_numpy=True, normalize_embeddings=True)
-    if embeddings.shape[0] != len(all_chunks):
-        raise RuntimeError(
-            "chunk 数量和向量数量不一致："
-            f"{len(all_chunks)} != {embeddings.shape[0]}"
-        )
+            chunk_writer.write("\n")
 
-    temp_path = embedding_path.with_suffix(".npy.tmp")
-
-    with temp_path.open("wb") as writer:
-        np.save(writer, embeddings.astype(np.float32))
-
-    temp_path.replace(embedding_path)
+    embeddings = model.encode(
+        [chunk["text"] for chunk in all_chunks],
+        batch_size=32,
+        show_progress_bar=True,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+    )
+    np.save(embedding_path, embeddings.astype(np.float32))
 
     print(f"chunks: {len(all_chunks)}")
     print(f"embedding shape: {embeddings.shape}")
@@ -120,7 +115,7 @@ def build_embedding(
 
 if __name__ == "__main__":
     project_root = Path(__file__).resolve().parents[1]
-    docID_path = project_root / 'data' / 'docID.jsonl'
+    doc_id_path = project_root / 'data' / 'docID.jsonl'
     chunk_path = project_root / 'data' / 'chunks.jsonl'
     embedding_path = project_root / 'data' / 'chunk_embeddings.npy'
     MODEL_NAME = "BAAI/bge-small-zh-v1.5"
@@ -128,9 +123,8 @@ if __name__ == "__main__":
 
     chunk_tokens = 384
     overlap_tokens = 64
-    step = chunk_tokens - overlap_tokens    
     build_embedding(project_root=project_root,
-                    docID_path=docID_path,
+                    doc_id_path=doc_id_path,
                     chunk_path=chunk_path, 
                     embedding_path=embedding_path,
                     model=model,
