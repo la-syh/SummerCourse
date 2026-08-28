@@ -26,16 +26,13 @@
 
 ## 环境
 
-本项目使用 `conda html` 环境：
-
 ```bash
-conda activate html
 pip install -r requirements.txt
 ```
 
 ## 常用命令
 
-所有命令均从项目根目录 `hw` 执行。
+所有命令均从项目根目录执行。
 
 生成或更新页面标题、摘要和内容指纹：
 
