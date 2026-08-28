@@ -1,19 +1,37 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8">
-    <title>Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RUC Search</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    >
   </head>
-  <body>
-    <div>
-      <form action="query" method="get">
-        <div>
-          <input type="text" name='key' placeholder="输入您想查询的关键词...">
-        </div>
-        <div>
-          <button type="submit">Go!</button>
-        </div>
+
+  <body class="home-page">
+    <main class="home-container">
+      <h1 class="logo">RUC Search</h1>
+      <p class="subtitle">中国人民大学网页搜索系统</p>
+
+      <form
+        class="search-form"
+        action="{{ url_for('query') }}"
+        method="get"
+      >
+        <input
+          class="search-input"
+          type="search"
+          name="key"
+          placeholder="输入要查询的关键词"
+          autocomplete="off"
+          required
+        >
+        <button class="search-button" type="submit">
+          搜索
+        </button>
       </form>
-    </div>
+    </main>
   </body>
 </html>

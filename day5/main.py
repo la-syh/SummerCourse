@@ -1,7 +1,6 @@
 from day4.Inverted_index import Inverted_index
 from flask import Flask, render_template, request
 import json
-from bs4 import BeautifulSoup
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
