@@ -11,7 +11,7 @@ flask==2.0.1
 ## Quick Start
 
 ```bash
-python main.py
+python -m day5.main
 ```
 
 Then open [localhost:12345](http://localhost:12345) in your browser.
