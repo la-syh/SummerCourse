@@ -3,10 +3,8 @@
 作业说明.md
 /.vscode
 __pycache__/
-archive/sample_page.html
-downloaded_html/
+data/
 crawler_checkpoint.json
 crawler_checkpoint.json.tmp
 crawled_links
-inverted_index/
 stopwords.txt

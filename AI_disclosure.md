@@ -678,11 +678,39 @@ AI 说明，这不会阻塞第一版向量检索。可以直接使用已在大�
 
 #### 43. 审查 embedding_builder 的可运行性
 
-我询问当前编写的 `ruc_search/embedding_builder.py` 是否可以直接运行。AI 检查了该脚本、新增的 `page_content.py`、环境依赖、输入路径和现有向量文件。脚本能通过 Python 语法编译，`docID.jsonl` 中的 `docID`、`file` 和 `url` 字段也与代码一致；但当前 `conda ML` 环境未安装 `sentence_transformers` 和 `resiliparse`，`requirements.txt` 也未声明这两个依赖，因此直接运行会在导入阶段失败。
+我询问当前编写的 `ruc_search/embedding_builder.py` 是否可以直接运行。AI 检查了该脚本、新增的 `page_content.py`、输入路径和现有向量文件。脚本能通过 Python 语法编译，`docID.jsonl` 中的 `docID`、`file` 和 `url` 字段也与代码一致。AI 最初误用 `conda ML` 环境检查依赖，并因此错误报告 `sentence_transformers` 和 `resiliparse` 未安装；我随后指出该项目实际使用 `conda html`。AI 在正确环境中重新核对，确认已安装 `sentence-transformers 5.6.0`、`resiliparse 1.0.9` 和 `numpy 2.4.6`，因此导入依赖本身不是当前运行阻塞。
 
 AI 还发现，当前名为 `build_embedding()` 的函数实际只读取网页、按 384 个 token 并以 64 token 重叠分块，最后写入 `chunks.jsonl`；它没有调用 `model.encode()`，没有生成或保存 chunk 向量，也没有建立向量行号与 `chunk_id` 的明确映射。函数依赖主程序中才定义的全局 `project_root`，并将所有分块先累积在内存后一次性写文件，因此不适合中断恢复，也难以观察 1.59 万个页面的处理进度。
 
 项目中已有一个 `document_embeddings.npy`，其形状为 `(15886, 512)`、类型为 `float32`、体积约 31 MiB，抽查行向量的范数均为 1 且数值有限，看起来是有效的归一化文档向量。但当前源代码中没有生成它的 `model.encode()` 逻辑，该文件行数与页面数一致而不是与 chunk 数一致，因此它不能直接当作新 `chunks.jsonl` 的分块向量使用。AI 本轮只进行了只读审查、向量文件抽查和语法编译，没有下载模型、生成全库分块或覆盖现有向量。
+
+#### 44. 设计 chunk encode 和消除 project_root 全局依赖
+
+我纠正环境判断后，进一步询问 `model.encode()` 应该如何写，以及 `build_embedding()` 隐式依赖全局 `project_root` 的问题应如何解决。AI 建议保持 `all_chunks` 的列表顺序与 `chunk_id` 递增顺序一致，将其中的 `text` 按批交给 `SentenceTransformer.encode()`，设置 `convert_to_numpy=True` 和 `normalize_embeddings=True`，并将返回的二维 `float32` 数组写入独立的 `chunk_embeddings.npy`。在此顺序约定下，向量第 (i) 行对应 `chunks.jsonl` 中 `chunk_id = i` 的记录。
+
+对于路径问题，AI 建议不再让函数读取主程序才创建的全局变量，而是在 `build_embedding()` 签名中显式增加 `project_root: Path`、`model: SentenceTransformer` 和 `embedding_path: Path` 参数，由 `if __name__ == "__main__"` 部分统一构造后传入。读取 `state["file"]` 时先判断是否为绝对路径，只对相对路径拼接项目根目录。本轮给出了可粘贴的参数传递和批量 encode 参考代码，但按我的问法没有直接改写 `embedding_builder.py`。
+
+#### 45. 修正中文 chunk 被 tokenizer.decode 拆成空格单字的问题
+
+我发现生成的 `chunks.jsonl` 中，`text` 的中文内容几乎全部变成了以空格分隔的单字，并询问这是否合理。AI 抽查了已生成的 114.44 MiB chunk 文件，前三个分块分别出现 339、268 和 316 处“中文字—空格—中文字”模式，确认这不是原网页排版，而是将 WordPiece 的 token IDs 通过 `tokenizer.decode()` 还原时插入的分隔空格。
+
+AI 说明，虽然再次分词时部分中文模型可能仍能得到相近 token，但这种文本会破坏原文展示、字符串匹配和证据引用，也使“分块后再编码”不再严格等价于对原文分块。建议使用 fast tokenizer 的 `return_offsets_mapping=True`，依据每个 token 在原始字符串中的起止偏移直接切片原文，而不调用 `decode()`。修正后必须重新生成 `chunks.jsonl` 和对应的 chunk embeddings，以保证向量行号、`chunk_id` 和文本一致。抽查还发现第一个 chunk 主要由导航栏组成，这与 `page_content.py` 当前使用 `main_content=False` 相符，后续应单独评估是否为 Embedding 语料开启主内容去噪。本轮只进行了文件抽查和修正方案说明，没有直接修改分块代码或删除已生成文件。
+
+#### 46. 说明 token 偏移与原文字符偏移
+
+我对修正代码中的 `char_start` 含义提出疑问。AI 说明，`token_start` 和 `token_end` 表示 chunk 在 tokenizer 输出 token 序列中的半开区间，而 `char_start` 和 `char_end` 表示同一 chunk 在原始 Python 字符串中的半开字符区间。fast tokenizer 返回的 `offset_mapping[i] = (a, b)` 表示第 (i) 个 token 来自原文 `text[a:b]`；因此一个 token 区间的原文可通过 `text[offsets[start][0]:offsets[end - 1][1]]` 精确取回。保存字符偏移不是生成 Embedding 的必要条件，但有助于原文引用、证据高亮、检查 chunk 覆盖和从页面正文中重建片段。本轮只进行概念解释，没有修改源代码。
+
+#### 47. 用实际 tokenizer 输出解释 encoded 和 offsets
+
+我继续询问 `encoded` 和 `offsets` 分别是什么。AI 使用当前 `conda html` 环境中已缓存的 `BAAI/bge-small-zh-v1.5` tokenizer，对示例文本“许洪腾老师讲授机器学习”进行了一次不联网的实际分词。`encoded` 是 tokenizer 返回的字典式 `BatchEncoding`，本次包含 `input_ids`、`token_type_ids`、`attention_mask` 和 `offset_mapping`；分块逻辑主要使用其中的 `input_ids` 与 `offset_mapping`。
+
+实际输出中，“许”对应 token ID 6387 和字符区间 `(0, 1)`，“洪”对应 ID 3825 和 `(1, 2)`，“腾”对应 ID 5596 和 `(2, 3)`；完整 11 个中文字在该 tokenizer 下得到 11 个 token。AI 说明，`input_ids` 是模型词表中的整数编号，是模型实际接收的输入；`attention_mask` 用来区分有效 token 与批处理时的填充位置；`token_type_ids` 主要用于区分句子段；`offset_mapping` 只是 tokenizer 额外返回给程序的原文坐标，不是送入 Embedding 模型的语义特征。本轮只对一条示例文本运行 tokenizer，没有生成或覆盖全库 chunk 和向量。
+
+#### 48. 讨论 JSON 与索引产物的存放目录
+
+我询问是否适合将项目中的所有 JSON 文件统一存入一个 `static` 目录。AI 说明，若这里指 Flask 或 Web 应用的 `static/`，则不应将后端倒排索引、URL 映射、页面元数据、chunk 记录和向量索引放入其中，因为该目录的语义是供浏览器直接获取 CSS、JavaScript、图片等前端资源，大型后端数据放在其中会带来误暴露、误下载和部署体积问题。
+
+AI 建议按数据生命周期而不是按文件扩展名组织目录：抓取的 HTML 和 `docID.jsonl` 属于原始语料；`page_metadata.jsonl` 和 `chunks.jsonl` 属于可重建的处理产物；倒排索引和 `.npy` 向量属于索引产物；只有页面前端确实需要公开请求的小型 JSON 才应放入 Web `static/`。如果只是想表示“固定生成的数据”，使用 `data/`、`artifacts/` 或 `indexes/` 等名称比 `static/` 更清晰。本轮只提供目录设计建议，没有移动或删除任何数据文件。
 
 ### 三、AI 建议的采纳与待处理情况
 
