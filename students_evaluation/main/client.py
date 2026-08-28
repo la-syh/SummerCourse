@@ -20,7 +20,7 @@ else:
 
 
 # 请替换为助教提供的评测服务器地址，并保留末尾斜杠。
-base_url = "http://10.47.253.18:8080/"
+base_url = "https://acids-bills-geometry-cricket.trycloudflare.com/"
 
 
 def input_idx() -> str:
