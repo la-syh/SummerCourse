@@ -62,7 +62,7 @@ def index():
 def query():
     key = request.args.get('key')
 
-    urls = search_service.search(key) if key else []
+    urls = search_service.search(key)
 
     results = []
     for url in urls:

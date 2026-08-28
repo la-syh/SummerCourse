@@ -43,6 +43,7 @@ def extract_page_info(html_path: Path, url: str) -> dict:
         soup,
         [
             {"name": "citation_title"},
+            {"name": "ArticleTitle"},
             {"property": "og:title"},
             {"name": "twitter:title"},
         ],
@@ -53,6 +54,16 @@ def extract_page_info(html_path: Path, url: str) -> dict:
 
     if not title:
         title = url
+
+    published_date = get_meta_content(
+        soup,
+        [
+            {"name": "PubDate"},
+            {"name": "publishdate"},
+            {"property": "article:published_time"},
+            {"name": "date"},
+        ],
+    )
 
     # 提取 h1、h2、h3，并保留第一个标题用于摘要回退
     heading_nodes = soup.find_all(["h1", "h2", "h3"])
@@ -75,6 +86,16 @@ def extract_page_info(html_path: Path, url: str) -> dict:
             for node in soup.find_all("p")
         )
     )
+    if not body_text:
+        # 兼容只使用 div/table 排版、完全没有 p 标签的旧网页。
+        for node in soup.find_all(
+            ["script", "style", "noscript", "template", "svg"]
+        ):
+            node.decompose()
+        visible_root = soup.body or soup
+        body_text = clean_text(
+            visible_root.get_text(" ", strip=True)
+        )
 
     abstract = get_meta_content(
         soup,
@@ -103,6 +124,7 @@ def extract_page_info(html_path: Path, url: str) -> dict:
     return {
         "title": title,
         "abstract": abstract,
+        "published_date": published_date,
         "content_hash": content_hash,
     }
 

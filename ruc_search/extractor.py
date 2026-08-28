@@ -97,6 +97,16 @@ class ExtractHTML:
         body_text = ' '.join(
             p.get_text(strip = True) for p in self.soup.find_all('p') if p.get_text(strip = True)
         )
+        if not body_text:
+            # 部分旧站点完全使用 div/table 排版，没有任何 p 标签。
+            # 此时退回到可见页面文字，避免整篇正文无法进入索引。
+            fallback = BeautifulSoup(str(self.soup), 'html.parser')
+            for node in fallback.find_all(
+                ['script', 'style', 'noscript', 'template', 'svg']
+            ):
+                node.decompose()
+            visible_root = fallback.body or fallback
+            body_text = visible_root.get_text(' ', strip=True)
         body_words = [word for word in jieba.lcut_for_search(body_text) if word.strip()]
 
         return title, doctitle, body_text, title_words, doctitle_words, body_words
