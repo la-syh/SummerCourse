@@ -1,6 +1,6 @@
 # RUC Embedding Search
 
-一个面向中国人民大学相关网页的本地混合检索项目，包含网页抓取、Resiliparse HTML 解析、token 分块、Embedding 构建和字段加权词法检索。
+一个面向中国人民大学相关网页的本地混合检索项目，包含网页抓取、Resiliparse HTML 解析、token 分块、Embedding 构建，以及字段加权 TF-IDF/BM25 词法检索。
 
 项目将“网页是什么”与“网页如何排序”分开：`info/` 是本地网页数据访问层，`ruc_search/` 只负责索引、召回和排序。
 
@@ -17,9 +17,9 @@
 │   └── page_info.py          # 按 URL 读取标题、正文和摘要
 ├── ruc_search/
 │   ├── embedding_builder.py  # token 分块与 chunk Embedding 构建
-│   ├── lexical_index.py      # 字段加权 TF-IDF 倒排索引
+│   ├── lexical_index.py      # 字段加权 TF-IDF/BM25 倒排索引
 │   ├── offline_model.py      # 强制只从本地缓存加载 Embedding 模型
-│   └── search_engine.py      # 词法与 Embedding 混合排序
+│   └── search_engine.py      # 可切换的词法、语义与混合排序
 ├── students_evaluation/rag/
 │   ├── agentic_rag.py        # 最多三轮的迭代检索控制器
 │   ├── call_model.py         # OpenAI 兼容的大模型调用封装
@@ -130,6 +130,16 @@ Crawler(
 
 ```bash
 python -m ruc_search.embedding_builder
+```
+
+### 检索模式与消融评测
+
+`SearchEngine.search()` 支持 `tfidf`、`bm25`、`embedding`、`tfidf_hybrid` 和 `bm25_hybrid` 五种模式，默认使用 `bm25_hybrid`。BM25 沿用标题、小标题、正文的 $3:2:1$ 字段权重，并使用 $k_1=1.5$、$b=0.75$ 进行词频饱和与文档长度归一化。
+
+连接课程 debug 服务器、在同一批查询上比较五种模式：
+
+```bash
+python -m students_evaluation.main.compare_methods
 ```
 
 启动 Web 界面：

@@ -32,6 +32,6 @@ search_service = SearchEngine(
 )
 
 
-def evaluate(query: str) -> list[str]:
+def evaluate(query: str, mode: str = "bm25_hybrid") -> list[str]:
     """检索一条查询，并返回前 20 个去重 URL。"""
-    return search_service.search(query, topk=20)
+    return search_service.search(query, topk=20, mode=mode)

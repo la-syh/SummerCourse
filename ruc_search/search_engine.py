@@ -145,10 +145,43 @@ class SearchEngine:
         np.maximum.at(document_scores, self.chunk_doc_ids, chunk_scores)
         return document_scores
 
-    def _hybrid_ranking(self, text: str) -> list[str]:
+    def _lexical_ranking(
+        self,
+        text: str,
+        method: str,
+    ) -> list[str]:
+        rows = self.lexical_index.search_with_scores(
+            text,
+            topk=self.CANDIDATE_COUNT,
+            method=method,
+        )
+        return [
+            url
+            for doc_id, _ in rows
+            if (url := self.document_registry.get_url(doc_id)) is not None
+        ]
+
+    def _embedding_ranking(self, text: str) -> list[str]:
+        dense_scores = self._dense_document_scores(text)
+        doc_ids = np.argsort(-dense_scores)
+        return [
+            url
+            for doc_id in doc_ids
+            if np.isfinite(dense_scores[int(doc_id)])
+            and (
+                url := self.document_registry.get_url(int(doc_id))
+            ) is not None
+        ]
+
+    def _hybrid_ranking(
+        self,
+        text: str,
+        lexical_method: str = "bm25",
+    ) -> list[str]:
         lexical_rows = self.lexical_index.search_with_scores(
             text,
             topk=self.CANDIDATE_COUNT,
+            method=lexical_method,
         )
         lexical_rank = {
             doc_id: rank
@@ -294,13 +327,44 @@ class SearchEngine:
 
         return urls
 
-    def search(self, text: str | None, topk: int = 20) -> list[str]:
+    def search(
+        self,
+        text: str | None,
+        topk: int = 20,
+        mode: str = "bm25_hybrid",
+    ) -> list[str]:
         if topk <= 0:
             return []
 
         normalized_text = str(text or "").strip().casefold()
         if normalized_text:
-            candidates = self._hybrid_ranking(normalized_text)
+            if mode == "tfidf":
+                candidates = self._lexical_ranking(
+                    normalized_text,
+                    method="tfidf",
+                )
+            elif mode == "bm25":
+                candidates = self._lexical_ranking(
+                    normalized_text,
+                    method="bm25",
+                )
+            elif mode == "embedding":
+                candidates = self._embedding_ranking(normalized_text)
+            elif mode == "tfidf_hybrid":
+                candidates = self._hybrid_ranking(
+                    normalized_text,
+                    lexical_method="tfidf",
+                )
+            elif mode == "bm25_hybrid":
+                candidates = self._hybrid_ranking(
+                    normalized_text,
+                    lexical_method="bm25",
+                )
+            else:
+                raise ValueError(
+                    "mode 必须是 tfidf、bm25、embedding、"
+                    "tfidf_hybrid 或 bm25_hybrid"
+                )
         else:
             candidates = self.document_registry.urls()
 
