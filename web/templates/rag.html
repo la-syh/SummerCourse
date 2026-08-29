@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="RUC Search RAG 问答">
+    <title>{{ key }} - RUC Search RAG</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    >
+  </head>
+
+  <body>
+    <header class="results-header">
+      <div class="header-content">
+        <a class="header-logo" href="{{ url_for('index') }}">
+          RUC Search
+        </a>
+
+        <form
+          class="search-form"
+          action="{{ url_for('query') }}"
+          method="get"
+        >
+          <input
+            class="search-input"
+            type="search"
+            name="key"
+            value="{{ key or '' }}"
+            placeholder="输入要搜索或提问的内容"
+            required
+          >
+          <button class="search-button" type="submit">
+            搜索
+          </button>
+          <button
+            class="rag-button"
+            type="submit"
+            formaction="{{ url_for('rag_query') }}"
+            formmethod="post"
+          >
+            RAG 问答
+          </button>
+        </form>
+      </div>
+    </header>
+
+    <main class="rag-container">
+      <p class="mode-label">RAG 问答</p>
+      <h1 class="question-title">{{ key }}</h1>
+
+      {% if error %}
+        <section class="rag-error" role="alert">
+          <h2>暂时无法生成答案</h2>
+          <p>{{ error }}</p>
+        </section>
+      {% else %}
+        <section class="answer-card">
+          <h2>RAG 回答</h2>
+          <div class="rag-answer">{{ answer }}</div>
+        </section>
+
+        {% if sources %}
+          <section class="sources-section">
+            <h2>检索依据</h2>
+            <p class="sources-description">
+              以下是 RAG 检索到的主要候选页面，可以打开核对原文。
+            </p>
+
+            {% for source in sources %}
+              <article class="source-card">
+                <a
+                  class="result-title"
+                  href="{{ source['url'] }}"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {{ source.get('title') or source['url'] }}
+                </a>
+                <p class="result-url">{{ source['url'] }}</p>
+                <p class="result-abstract">
+                  {{ source.get('snippet') or '暂无摘要' }}
+                </p>
+              </article>
+            {% endfor %}
+          </section>
+        {% endif %}
+      {% endif %}
+    </main>
+  </body>
+</html>

@@ -32,6 +32,14 @@
         <button class="search-button" type="submit">
           搜索
         </button>
+        <button
+          class="rag-button"
+          type="submit"
+          formaction="{{ url_for('rag_query') }}"
+          formmethod="post"
+        >
+          RAG 问答
+        </button>
       </form>
     </main>
   </body>

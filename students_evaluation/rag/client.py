@@ -129,7 +129,12 @@ def main() -> None:
         try:
             answer = rag_evaluate(query)
         except Exception as exc:
-            print(f"RAG question {number} failed: {type(exc).__name__}")
+            detail = str(exc).strip()
+            suffix = f": {detail}" if detail else ""
+            print(
+                f"RAG question {number} failed: "
+                f"{type(exc).__name__}{suffix}"
+            )
             answer = ""
         elapsed = time.monotonic() - started
 

@@ -18,7 +18,12 @@
 ├── ruc_search/
 │   ├── embedding_builder.py  # token 分块与 chunk Embedding 构建
 │   ├── lexical_index.py      # 字段加权 TF-IDF 倒排索引
+│   ├── offline_model.py      # 强制只从本地缓存加载 Embedding 模型
 │   └── search_engine.py      # 词法与 Embedding 混合排序
+├── students_evaluation/rag/
+│   ├── agentic_rag.py        # 最多三轮的迭代检索控制器
+│   ├── call_model.py         # OpenAI 兼容的大模型调用封装
+│   └── search_engine.py      # RAG 检索、上下文构建与评测接口
 ├── data/                     # 本地数据和可重建产物，不提交
 │   ├── downloaded_html/      # 按域名保存的 HTML
 │   ├── docID.jsonl           # docID、URL 和 HTML 路径映射
@@ -35,6 +40,18 @@
 ```bash
 pip install -r requirements.txt
 ```
+
+### 离线运行
+
+所有检索入口都通过 `ruc_search/offline_model.py` 加载 Embedding 模型。代码会强制启用 Hugging Face、Transformers 和 Datasets 的离线模式，并使用 `local_files_only=True`，因此测试时不会尝试从 Hugging Face Hub 下载文件。缓存缺失时程序会立即给出明确错误。
+
+断网前可以执行以下命令验证本地缓存：
+
+```bash
+python -c "from ruc_search.offline_model import load_embedding_model; load_embedding_model(); print('local model ready')"
+```
+
+`data/docID.jsonl`、`data/chunks.jsonl`、`data/chunk_embeddings.npy` 和 `data/lexical_index.json` 也必须保留在本地。需要注意，Embedding 检索可以完全离线运行，但 `students_evaluation/rag/call_model.py` 当前调用远程 DeepSeek API；如果 RAG 生成环节也完全断网，则还需要课程提供的本地接口或本地大模型。
 
 ## 常用命令
 
@@ -120,6 +137,17 @@ python -m ruc_search.embedding_builder
 ```bash
 python -m web.app
 ```
+
+普通检索可以直接使用；RAG 问答还需要在启动前设置 DeepSeek API Key：
+
+```bash
+export DEEPSEEK_API_KEY="你的 API Key"
+python -m web.app
+```
+
+在首页输入内容后，可以选择“搜索”查看 20 条检索结果，也可以选择“RAG 问答”生成答案并查看用于核对的来源页面。两种模式共用同一个检索服务，不会重复加载 Embedding 模型和索引。
+
+RAG 默认最多执行三轮迭代检索。每轮模型会根据当前累计证据选择直接回答，或生成一条更具体的新检索词；第三轮强制生成答案。多年份问题会逐年检索，包含多个高信息实体的企业参访问题会逐实体检索；不同子查询与不同轮次的结果均按 URL 去重并交错合并，防止某一个查询占满上下文。原有的 `rag_evaluate(query) -> str` 接口保持不变。
 
 ## 数据与提交
 

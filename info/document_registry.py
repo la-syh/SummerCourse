@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import json
 from pathlib import Path
 from typing import Iterator
@@ -56,40 +55,15 @@ class DocumentRegistry:
                         f"{self.mapping_path}:{line_number} 不是有效文档记录"
                     ) from error
 
-                if record.doc_id < 0:
-                    raise ValueError("docID 必须是非负整数")
-                if record.doc_id in self._by_doc_id:
-                    raise ValueError(f"重复 docID: {record.doc_id}")
-                if record.url in self._by_url:
-                    raise ValueError(f"重复 URL: {record.url}")
-
                 self._records.append(record)
                 self._by_doc_id[record.doc_id] = record
                 self._by_url[record.url] = record
-
-        actual_ids = set(self._by_doc_id)
-        expected_ids = set(range(len(self._records)))
-        if actual_ids != expected_ids:
-            raise ValueError(
-                "docID 必须从 0 开始连续编号，"
-                "否则稠密向量与 docID 无法按下标对齐"
-            )
 
     def __len__(self) -> int:
         return len(self._records)
 
     def __iter__(self) -> Iterator[DocumentRecord]:
         return iter(self._records)
-
-    @property
-    def signature(self) -> str:
-        """返回映射内容的稳定签名，用于判断索引是否过期。"""
-        digest = hashlib.sha256()
-        for record in self._records:
-            digest.update(
-                f"{record.doc_id}\0{record.url}\0{record.html_path}\n".encode()
-            )
-        return digest.hexdigest()
 
     @property
     def next_doc_id(self) -> int:

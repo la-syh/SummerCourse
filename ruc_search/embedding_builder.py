@@ -2,7 +2,8 @@ import json
 from pathlib import Path
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
+
+from .offline_model import SentenceTransformer, load_embedding_model
 
 from info import DocumentRegistry, PageInfoStore
 
@@ -141,8 +142,7 @@ if __name__ == "__main__":
     doc_id_path = project_root / 'data' / 'docID.jsonl'
     chunk_path = project_root / 'data' / 'chunks.jsonl'
     embedding_path = project_root / 'data' / 'chunk_embeddings.npy'
-    MODEL_NAME = "BAAI/bge-small-zh-v1.5"
-    model = SentenceTransformer(MODEL_NAME)
+    model = load_embedding_model()
     document_registry = DocumentRegistry(project_root, doc_id_path)
     page_info_store = PageInfoStore(document_registry)
 

@@ -9,12 +9,12 @@ import re
 
 import jieba
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
 from info import DocumentRegistry, PageInfoStore
 
 from .embedding_builder import Embeddings
 from .lexical_index import LexicalIndex
+from .offline_model import SentenceTransformer
 
 
 def compact_search_text(text: str) -> str:

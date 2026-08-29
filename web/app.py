@@ -1,20 +1,23 @@
 """RUC Search 的 Flask Web 入口。"""
 
 from flask import Flask, render_template, request
-from sentence_transformers import SentenceTransformer
 from markupsafe import Markup, escape
 from pathlib import Path
 import re
 
+from ruc_search.offline_model import load_embedding_model
 from ruc_search.search_engine import SearchEngine
 from info import DocumentRegistry, PageInfoStore
+from students_evaluation.rag.search_engine import (
+    configure_services,
+    rag_answer,
+)
 
 project_root = Path(__file__).resolve().parents[1]
 doc_id_path = project_root / 'data' / 'docID.jsonl'
 chunk_path = project_root / 'data' / 'chunks.jsonl'
 embedding_path = project_root / 'data' / 'chunk_embeddings.npy'
-MODEL_NAME = "BAAI/bge-small-zh-v1.5"
-model = SentenceTransformer(MODEL_NAME, local_files_only=True)
+model = load_embedding_model()
 document_registry = DocumentRegistry(project_root, doc_id_path)
 page_info_store = PageInfoStore(document_registry)
 
@@ -28,6 +31,7 @@ search_service = SearchEngine(
     embedding_path,
     model,
 )
+configure_services(search_service, page_info_store)
 app = Flask(__name__)
 
 
@@ -96,6 +100,39 @@ def query():
         )
 
     return render_template('res.html', key=key, results=results)
+
+
+@app.route('/rag', methods=['POST'])
+def rag_query():
+    question = str(request.form.get('key') or '').strip()
+    if not question:
+        return render_template(
+            'rag.html',
+            key='',
+            answer='',
+            sources=[],
+            error='请先输入一个问题。',
+        ), 400
+
+    try:
+        answer, sources = rag_answer(question)
+        error = ''
+    except Exception as exc:
+        app.logger.exception("RAG 问答失败")
+        answer = ''
+        sources = []
+        error = (
+            f"RAG 生成失败（{type(exc).__name__}）。"
+            "请检查 API Key、模型配置和网络连接。"
+        )
+
+    return render_template(
+        'rag.html',
+        key=question,
+        answer=answer,
+        sources=sources,
+        error=error,
+    )
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=12345, debug=True)

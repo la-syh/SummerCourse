@@ -4,11 +4,15 @@ from typing import TypedDict
 
 import jieba
 
-from call_model import call_model
+if __package__:
+    from .agentic_rag import run_agentic_rag
+    from .call_model import call_model
+else:
+    from agentic_rag import run_agentic_rag
+    from call_model import call_model
 
 from pathlib import Path
 import sys, re
-from sentence_transformers import SentenceTransformer
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -16,31 +20,44 @@ PROJECT_ROOT_TEXT = str(PROJECT_ROOT)
 if PROJECT_ROOT_TEXT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_TEXT)
 
+from ruc_search.offline_model import load_embedding_model
 from ruc_search.search_engine import SearchEngine
 from info import DocumentRegistry, PageInfoStore
 
 
-doc_id_path = PROJECT_ROOT / "data" / "docID.jsonl"
-chunk_path = PROJECT_ROOT / "data" / "chunks.jsonl"
-embedding_path = PROJECT_ROOT / "data" / "chunk_embeddings.npy"
-MODEL_NAME = "BAAI/bge-small-zh-v1.5"
-model = SentenceTransformer(
-    MODEL_NAME,
-    local_files_only=True,
-)
-document_registry = DocumentRegistry(PROJECT_ROOT, doc_id_path)
-page_info_store = PageInfoStore(document_registry)
+search_service: SearchEngine | None = None
+page_info_store: PageInfoStore | None = None
 
-chunk_tokens = 384
-overlap_tokens = 64
-search_service = SearchEngine(
-    PROJECT_ROOT,
-    document_registry,
-    page_info_store,
-    chunk_path,
-    embedding_path,
-    model,
-)
+
+def configure_services(
+    service: SearchEngine,
+    pages: PageInfoStore,
+) -> None:
+    """注入已有检索服务，避免 Web 重复加载模型与索引。"""
+    global search_service, page_info_store
+    search_service = service
+    page_info_store = pages
+
+
+def get_services() -> tuple[SearchEngine, PageInfoStore]:
+    """返回已注入的服务；独立评测时才延迟创建默认实例。"""
+    global search_service, page_info_store
+    if search_service is None or page_info_store is None:
+        doc_id_path = PROJECT_ROOT / "data" / "docID.jsonl"
+        chunk_path = PROJECT_ROOT / "data" / "chunks.jsonl"
+        embedding_path = PROJECT_ROOT / "data" / "chunk_embeddings.npy"
+        model = load_embedding_model()
+        document_registry = DocumentRegistry(PROJECT_ROOT, doc_id_path)
+        page_info_store = PageInfoStore(document_registry)
+        search_service = SearchEngine(
+            PROJECT_ROOT,
+            document_registry,
+            page_info_store,
+            chunk_path,
+            embedding_path,
+            model,
+        )
+    return search_service, page_info_store
 
 
 class SearchResult(TypedDict, total=False):
@@ -50,6 +67,7 @@ class SearchResult(TypedDict, total=False):
     title: str
     snippet: str
     content: str
+    matched_query: str
 
 
 def search(query: str, top_k: int = 20) -> list[SearchResult]:
@@ -66,10 +84,11 @@ def search(query: str, top_k: int = 20) -> list[SearchResult]:
             "content": "可选的网页正文",
         }]
     """
-    urls = search_service.search(query, topk=top_k)
+    service, pages = get_services()
+    urls = service.search(query, topk=top_k)
     results = []
     for url in urls:
-        page_info = page_info_store.get_page_info(url)
+        page_info = pages.get_page_info(url)
 
         results.append(SearchResult(
             {
@@ -84,20 +103,21 @@ def search(query: str, top_k: int = 20) -> list[SearchResult]:
 
 def extract_query_terms(query: str, limit: int = 12) -> list[str]:
     """选出适合正文片段匹配的高信息量查询词。"""
+    service, _ = get_services()
     weighted_terms = []
     seen = set()
-    for term in search_service.lexical_index.normalize_words(
+    for term in service.lexical_index.normalize_words(
         jieba.lcut_for_search(query)
     ):
         normalized = term.strip().casefold()
         if (
             len(normalized) < 2
             or normalized in seen
-            or normalized not in search_service.lexical_index.terms
+            or normalized not in service.lexical_index.terms
         ):
             continue
         seen.add(normalized)
-        idf = search_service.lexical_index.terms[normalized]["idf"]
+        idf = service.lexical_index.terms[normalized]["idf"]
         weighted_terms.append((idf, normalized))
 
     weighted_terms.sort(reverse=True)
@@ -125,42 +145,81 @@ def build_search_queries(query: str) -> list[str]:
         queries.append(" ".join(parts))
 
     years = list(dict.fromkeys(re.findall(r"(?:19|20)\d{2}", query)))
+    rare_terms = extract_query_terms(query, limit=10)
+
+    # 多年份问题必须逐年召回，避免一条混合 query 只命中其中某一年。
+    if len(years) >= 2:
+        year_anchors = [
+            term
+            for term in rare_terms
+            if term not in years
+            and term not in {"比较", "分别", "年份", "年度", "排序"}
+        ][:4]
+        for year in years:
+            queries.append(" ".join([year, *year_anchors]))
+
     if "夏令营" in query:
         for year in years:
             queries.append(f"{year} 高瓴人工智能学院 夏令营")
 
     if "参访" in query:
-        companies = []
-        for company in re.findall(r"([\u4e00-\u9fff]{2,4})公司", query):
-            company = re.sub(r"^(?:参访|和|与|及)", "", company)
-            if company and company not in companies:
-                companies.append(company)
-        for company in companies:
-            queries.append(f"高瓴人工智能学院 {company}公司 参访")
+        # 列举多个公司的问法通常只在最后一个名称后写“公司”。直接截取
+        # “公司”前的字符会把“快手和腾讯”误识别为一个实体，因此利用
+        # 高 IDF 查询词为每个候选实体分别召回。
+        generic_terms = {
+            "按照", "参访", "企业", "活动", "公司", "排序", "顺序",
+            "站次", "第几站", "进行", "分别", "高瓴", "人工智能学院",
+        }
+        entity_terms = [
+            term
+            for term in rare_terms
+            if term not in generic_terms
+            and term not in years
+            and not term.isdigit()
+            and 2 <= len(term) <= 8
+        ][:5]
+        for entity in entity_terms:
+            queries.append(f"{entity} 公司 企业参访")
 
     if "科技新星" in query:
         queries.append("高瓴人工智能学院 2024 北京市科技新星计划 入选教师")
 
-    rare_terms = extract_query_terms(query, limit=8)
     if rare_terms:
-        queries.append(" ".join(rare_terms))
+        queries.append(" ".join(rare_terms[:8]))
     queries.append(query)
     return list(dict.fromkeys(item for item in queries if item))[:8]
 
 
 def multi_search(query: str, top_k: int = 5) -> list[SearchResult]:
-    """执行多个短查询并按首次出现顺序合并 URL。"""
+    """执行多个短查询，按查询轮流合并并去除重复 URL。"""
+    search_queries = build_search_queries(query)
+    result_groups = []
+    for search_query in search_queries:
+        group = []
+        for result in search(search_query, top_k=top_k):
+            group.append(
+                SearchResult({**result, "matched_query": search_query})
+            )
+        result_groups.append(group)
+
     results = []
     seen_urls = set()
-    for search_query in build_search_queries(query):
-        for result in search(search_query, top_k=top_k):
-            url = result.get('url', '')
+    result_limit = max(10, top_k * 4)
+    maximum_length = max(map(len, result_groups), default=0)
+    for rank in range(maximum_length):
+        for group in result_groups:
+            if rank >= len(group):
+                continue
+            result = group[rank]
+            url = result.get("url", "")
             if url in seen_urls:
                 continue
             seen_urls.add(url)
             results.append(result)
-            if len(results) >= max(10, top_k * 3):
+            if len(results) >= result_limit:
                 break
+        if len(results) >= result_limit:
+            break
 
     # 二跳检索：先从指定年份的入选报道标题识别教师，再检索主页课程。
     if "个人主页" in query and "入选" in query:
@@ -189,7 +248,7 @@ def multi_search(query: str, top_k: int = 5) -> list[SearchResult]:
         if second_hop_results:
             results = results[:5] + second_hop_results + results[5:]
 
-    return results[:max(10, top_k * 4)]
+    return results[:result_limit]
 
 
 def snippet_merge(
@@ -266,6 +325,9 @@ def full_merge(
         title = clean_content(
             result.get("title", "")
         )
+        matched_query = clean_content(
+            result.get("matched_query", "")
+        )
 
         content = clean_content(
             result.get("content", "")
@@ -297,6 +359,7 @@ def full_merge(
         pages.append({
             "url": url,
             "title": title or url,
+            "matched_query": matched_query,
             "content": content,
         })
 
@@ -317,8 +380,10 @@ def full_merge(
             f"[资料{index}]\n"
             f"标题：{page['title']}\n"
             f"URL：{page['url']}\n"
-            f"正文："
         )
+        if page["matched_query"]:
+            header += f"命中检索词：{page['matched_query']}\n"
+        header += "正文："
 
         # 给后面的页面预留空间，防止第一篇占满上下文
         page_budget = (
@@ -416,42 +481,36 @@ def integrate_information(
     raise ValueError("strategy 必须是 snippet、full 或 custom")
 
 
+def rag_answer(
+    query: str,
+    top_k: int = 5,
+    strategy: str = "custom",
+    max_rounds: int = 3,
+) -> tuple[str, list[SearchResult]]:
+    """最多执行三轮迭代检索，并返回答案及实际使用的候选来源。"""
+    answer, sources = run_agentic_rag(
+        query,
+        multi_search,
+        integrate_information,
+        call_model,
+        top_k=top_k,
+        strategy=strategy,
+        max_rounds=max_rounds,
+    )
+    return answer, sources
+
+
 def rag_evaluate(
     query: str,
     top_k: int = 5,
     strategy: str = "custom",
+    max_rounds: int = 3,
 ) -> str:
-    """新增 RAG 评测接口：对一条查询只返回一个字符串答案。
-
-    同学可以修改内部提示词、上下文合并方式或检索数量。评测客户端仍会
-    以 ``rag_evaluate(query)`` 调用，因此默认参数必须可以直接运行。
-    """
-    results = multi_search(query, top_k=top_k)
-    context = integrate_information(results, strategy=strategy, query=query)
-    if not context:
-        return "未检索到足够信息"
-
-    prompt = f"""请仅依据下面的检索材料回答问题。
-
-要求：
-1. 回答事实本身，不要输出分析过程；
-2. 涉及计数、实体或日期时给出明确结果；
-3. 先识别问题要求的答案类型和输出对象。排序问题要区分“被排序的对象”和“排序依据”：输出问题明确要求的对象，排序依据用于计算；只有问题明确询问数值时才以数值作为主体；
-4. 问题要求共同项或交集时，分别读取每个对象的材料，再求交集；
-5. 问题涉及报道中的人物及其主页时，将报道和主页材料关联起来；
-6. 证据可能分散在不同资料中，必须综合所有资料，不要因为单篇资料不完整就回答“材料不足”；
-7. 同一对象出现多条记录时，优先依据问题中的年份、活动名称、系列和其他限定条件消歧；若仍有多个候选值，判断它们是否会改变问题所求结论：所有候选都导向同一结论时直接回答该稳定结论，只有结论确实会随候选变化时才说明歧义；不要自行假设“最早”或“最新”；
-8. 只有必需实体确实没有任何证据时才回答“材料不足”，不要使用材料之外的知识猜测；
-9. 无论材料是否充分都必须返回非空字符串。
-
-问题：{query}
-
-检索材料：
-{context}
-
-最终答案："""
-    return call_model(
-        user_prompt=prompt,
-        system_prompt="你是一个基于检索材料进行事实问答的 RAG 助手。",
-        timeout=60.0,
-    ).strip()
+    """评测接口：对一条查询只返回答案字符串。"""
+    answer, _ = rag_answer(
+        query,
+        top_k=top_k,
+        strategy=strategy,
+        max_rounds=max_rounds,
+    )
+    return answer

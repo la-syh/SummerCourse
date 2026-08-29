@@ -31,12 +31,7 @@ class LexicalIndex:
 
         if self.index_path.exists():
             self._load()
-            if (
-                self.document_count != len(self.document_registry)
-                or self.registry_signature is not None
-                and self.registry_signature
-                != self.document_registry.signature
-            ):
+            if self.document_count != len(self.document_registry):
                 self._build()
                 self._save()
         else:
@@ -130,7 +125,6 @@ class LexicalIndex:
         state = {
             "version": self.INDEX_VERSION,
             "document_count": self.document_count,
-            "registry_signature": self.document_registry.signature,
             "doc_lengths": self.doc_lengths,
             "terms": self.terms,
         }
@@ -142,7 +136,6 @@ class LexicalIndex:
         with self.index_path.open(encoding="utf-8") as reader:
             state = json.load(reader)
         self.document_count = int(state["document_count"])
-        self.registry_signature = state.get("registry_signature")
         self.doc_lengths = state["doc_lengths"]
         self.terms = state["terms"]
 

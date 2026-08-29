@@ -3,14 +3,12 @@
 from pathlib import Path
 import sys
 
-from sentence_transformers import SentenceTransformer
-
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT_TEXT = str(PROJECT_ROOT)
 if PROJECT_ROOT_TEXT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_TEXT)
 
+from ruc_search.offline_model import load_embedding_model
 from ruc_search.search_engine import SearchEngine
 from info import DocumentRegistry, PageInfoStore
 
@@ -18,11 +16,7 @@ from info import DocumentRegistry, PageInfoStore
 doc_id_path = PROJECT_ROOT / "data" / "docID.jsonl"
 chunk_path = PROJECT_ROOT / "data" / "chunks.jsonl"
 embedding_path = PROJECT_ROOT / "data" / "chunk_embeddings.npy"
-MODEL_NAME = "BAAI/bge-small-zh-v1.5"
-model = SentenceTransformer(
-    MODEL_NAME,
-    local_files_only=True,
-)
+model = load_embedding_model()
 document_registry = DocumentRegistry(PROJECT_ROOT, doc_id_path)
 page_info_store = PageInfoStore(document_registry)
 
