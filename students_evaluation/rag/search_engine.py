@@ -5,10 +5,8 @@ from typing import TypedDict
 import jieba
 
 if __package__:
-    from .agentic_rag import run_agentic_rag
     from .call_model import call_model
 else:
-    from agentic_rag import run_agentic_rag
     from call_model import call_model
 
 from pathlib import Path
@@ -485,32 +483,53 @@ def rag_answer(
     query: str,
     top_k: int = 5,
     strategy: str = "custom",
-    max_rounds: int = 3,
 ) -> tuple[str, list[SearchResult]]:
-    """最多执行三轮迭代检索，并返回答案及实际使用的候选来源。"""
-    answer, sources = run_agentic_rag(
-        query,
-        multi_search,
-        integrate_information,
-        call_model,
-        top_k=top_k,
+    """检索并整合一次上下文，只调用一次模型生成最终答案。"""
+    results = multi_search(query, top_k=top_k)
+    context = integrate_information(
+        results,
         strategy=strategy,
-        max_rounds=max_rounds,
+        query=query,
     )
-    return answer, sources
+    if not context:
+        return "未检索到足够信息", results[:10]
+
+    prompt = f"""请仅依据下面的检索材料回答问题。
+
+要求：
+1. 回答事实本身，不要输出分析过程；
+2. 涉及计数、实体或日期时给出明确结果；
+3. 先识别问题要求的答案类型和输出对象。排序问题要区分“被排序的对象”和“排序依据”：输出问题明确要求的对象，排序依据用于计算；只有问题明确询问数值时才以数值作为主体；
+4. 问题要求共同项或交集时，分别读取每个对象的材料，再求交集；
+5. 问题涉及报道中的人物及其主页时，将报道和主页材料关联起来；
+6. 证据可能分散在不同资料中，必须综合所有资料，不要因为单篇资料不完整就回答“材料不足”；
+7. 同一对象出现多条记录时，优先依据问题中的年份、活动名称、系列和其他限定条件消歧；若仍有多个候选值，判断它们是否会改变问题所求结论：所有候选都导向同一结论时直接回答该稳定结论，只有结论确实会随候选变化时才说明歧义；不要自行假设“最早”或“最新”；
+8. 只有必需实体确实没有任何证据时才回答“材料不足”，不要使用材料之外的知识猜测；
+9. 无论材料是否充分都必须返回非空字符串。
+
+问题：{query}
+
+检索材料：
+{context}
+
+最终答案："""
+    answer = call_model(
+        user_prompt=prompt,
+        system_prompt="你是一个基于检索材料进行事实问答的 RAG 助手。",
+        timeout=60.0,
+    ).strip()
+    return answer or "材料不足", results[:10]
 
 
 def rag_evaluate(
     query: str,
     top_k: int = 5,
     strategy: str = "custom",
-    max_rounds: int = 3,
 ) -> str:
-    """评测接口：对一条查询只返回答案字符串。"""
+    """单次检索、单次模型调用，并返回一个答案字符串。"""
     answer, _ = rag_answer(
         query,
         top_k=top_k,
         strategy=strategy,
-        max_rounds=max_rounds,
     )
     return answer
