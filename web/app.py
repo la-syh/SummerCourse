@@ -121,10 +121,15 @@ def rag_query():
         app.logger.exception("RAG 问答失败")
         answer = ''
         sources = []
-        error = (
-            f"RAG 生成失败（{type(exc).__name__}）。"
-            "请检查 API Key、模型配置和网络连接。"
-        )
+        if isinstance(exc, RuntimeError) and str(exc).strip():
+            # RuntimeError 由本项目主动抛出，只包含缺少 Key、连续空响应等
+            # 可安全展示的诊断信息，不应再用笼统提示掩盖真正原因。
+            error = f"RAG 生成失败：{str(exc).strip()}"
+        else:
+            error = (
+                f"RAG 生成失败（{type(exc).__name__}）。"
+                "请检查模型配置和网络连接，并查看服务端日志。"
+            )
 
     return render_template(
         'rag.html',

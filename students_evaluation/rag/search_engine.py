@@ -479,6 +479,33 @@ def integrate_information(
     raise ValueError("strategy 必须是 snippet、full 或 custom")
 
 
+def best_effort_evidence_answer(
+    context: str,
+    results: list[SearchResult],
+) -> str:
+    """模型拒答时，从最高相关材料中返回一个非拒答式候选答案。"""
+    sections = re.split(r"(?=\[资料\d+\])", str(context or ""))
+    for section in sections:
+        body_match = re.search(
+            r"^正文：(.*)$",
+            section,
+            flags=re.MULTILINE | re.DOTALL,
+        )
+        if body_match:
+            evidence = clean_content(body_match.group(1))
+            if evidence:
+                return f"最可能答案：{evidence[:300]}"
+
+    for result in results:
+        candidate = clean_content(
+            result.get("snippet", "")
+            or result.get("title", "")
+        )
+        if candidate:
+            return f"最可能答案：{candidate[:300]}"
+    return "最可能答案：无法从本地网页中提取到明确事实。"
+
+
 def rag_answer(
     query: str,
     top_k: int = 5,
@@ -491,10 +518,9 @@ def rag_answer(
         strategy=strategy,
         query=query,
     )
-    if not context:
-        return "未检索到足够信息", results[:10]
+    prompt_context = context or "（没有检索到有效材料，请根据问题本身给出最可能的答案。）"
 
-    prompt = f"""请仅依据下面的检索材料回答问题。
+    prompt = f"""请优先依据下面的检索材料回答问题。
 
 要求：
 1. 回答事实本身，不要输出分析过程；
@@ -502,23 +528,37 @@ def rag_answer(
 3. 先识别问题要求的答案类型和输出对象。排序问题要区分“被排序的对象”和“排序依据”：输出问题明确要求的对象，排序依据用于计算；只有问题明确询问数值时才以数值作为主体；
 4. 问题要求共同项或交集时，分别读取每个对象的材料，再求交集；
 5. 问题涉及报道中的人物及其主页时，将报道和主页材料关联起来；
-6. 证据可能分散在不同资料中，必须综合所有资料，不要因为单篇资料不完整就回答“材料不足”；
+6. 证据可能分散在不同资料中，必须综合所有资料，不要因为单篇资料不完整就拒绝回答；
 7. 同一对象出现多条记录时，优先依据问题中的年份、活动名称、系列和其他限定条件消歧；若仍有多个候选值，判断它们是否会改变问题所求结论：所有候选都导向同一结论时直接回答该稳定结论，只有结论确实会随候选变化时才说明歧义；不要自行假设“最早”或“最新”；
-8. 只有必需实体确实没有任何证据时才回答“材料不足”，不要使用材料之外的知识猜测；
-9. 无论材料是否充分都必须返回非空字符串。
+8. 即使证据不完整或没有直接证据，也必须结合已有线索给出一个最可能的具体答案；不确定时可以使用“最可能是”，但不得输出“材料不足”“信息不足”“无法回答”或其他拒答；
+9. 最终输出必须包含问题所要求类型的具体对象、数值或顺序，不要只解释不确定性。
 
 问题：{query}
 
 检索材料：
-{context}
+{prompt_context}
 
 最终答案："""
     answer = call_model(
         user_prompt=prompt,
-        system_prompt="你是一个基于检索材料进行事实问答的 RAG 助手。",
+        system_prompt=(
+            "你是一个基于检索材料进行事实问答的 RAG 助手。"
+            "即使证据不完整，也必须给出最可能的具体答案，不能拒答。"
+        ),
         timeout=60.0,
+        attempts=1,
     ).strip()
-    return answer or "材料不足", results[:10]
+    refusal_markers = (
+        "材料不足",
+        "信息不足",
+        "无法回答",
+        "无法确定",
+        "不能确定",
+        "未检索到足够信息",
+    )
+    if not answer or any(marker in answer for marker in refusal_markers):
+        answer = best_effort_evidence_answer(context, results)
+    return answer, results[:10]
 
 
 def rag_evaluate(

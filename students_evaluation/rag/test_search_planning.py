@@ -7,6 +7,46 @@ from . import search_engine
 
 
 class SearchPlanningTest(unittest.TestCase):
+    def test_rag_calls_model_even_without_context(self):
+        with (
+            patch.object(search_engine, "multi_search", return_value=[]),
+            patch.object(
+                search_engine,
+                "integrate_information",
+                return_value="",
+            ),
+            patch.object(
+                search_engine,
+                "call_model",
+                return_value="最可能是《机器学习基础》",
+            ) as model,
+        ):
+            answer, _ = search_engine.rag_answer("哪一门课程？")
+
+        self.assertEqual(answer, "最可能是《机器学习基础》")
+        self.assertEqual(model.call_count, 1)
+        self.assertIn(
+            "没有检索到有效材料",
+            model.call_args.kwargs["user_prompt"],
+        )
+
+    def test_refusal_is_replaced_by_best_evidence(self):
+        results = [{"url": "u", "title": "t", "snippet": "候选事实"}]
+        context = "[资料1]\n标题：t\n正文：候选课程为机器学习基础。"
+        with (
+            patch.object(search_engine, "multi_search", return_value=results),
+            patch.object(
+                search_engine,
+                "integrate_information",
+                return_value=context,
+            ),
+            patch.object(search_engine, "call_model", return_value="材料不足"),
+        ):
+            answer, _ = search_engine.rag_answer("哪一门课程？")
+
+        self.assertNotIn("材料不足", answer)
+        self.assertIn("机器学习基础", answer)
+
     def test_company_entities_are_searched_separately(self):
         terms = ["快手", "参访", "华为", "腾讯", "排序", "公司", "企业"]
         with patch.object(

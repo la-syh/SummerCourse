@@ -24,6 +24,47 @@ def response(content, finish_reason="stop"):
 
 
 class CallModelTest(unittest.TestCase):
+    def test_single_attempt_receives_almost_full_timeout_budget(self):
+        client = MagicMock()
+        client.chat.completions.create.return_value = response("答案")
+
+        with (
+            patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}),
+            patch.object(
+                call_model_module,
+                "OpenAI",
+                return_value=client,
+            ) as openai,
+        ):
+            call_model_module.call_model(
+                "测试问题",
+                timeout=60.0,
+                attempts=1,
+            )
+
+        self.assertEqual(openai.call_args.kwargs["timeout"], 55.0)
+
+    def test_thinking_mode_is_enabled(self):
+        client = MagicMock()
+        client.chat.completions.create.return_value = response("简短答案")
+
+        with (
+            patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}),
+            patch.object(call_model_module, "OpenAI", return_value=client),
+        ):
+            call_model_module.call_model("测试问题")
+
+        self.assertEqual(
+            client.chat.completions.create.call_args.kwargs["extra_body"],
+            {"thinking": {"type": "enabled"}},
+        )
+        self.assertEqual(
+            client.chat.completions.create.call_args.kwargs[
+                "reasoning_effort"
+            ],
+            "low",
+        )
+
     def test_empty_content_is_retried(self):
         client = MagicMock()
         client.chat.completions.create.side_effect = [
