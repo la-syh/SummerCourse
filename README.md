@@ -33,7 +33,6 @@
 ## 环境
 
 ```bash
-conda activate html
 pip install -r requirements.txt
 ```
 
@@ -65,7 +64,7 @@ python -m crawler.crawler
 
 ### 网页信息 API
 
-`DocumentRegistry` 是 `docID.jsonl` 的唯一读写入口；检索引擎、索引构建器和爬虫不再自行保存 `docID -> URL` 映射。
+`DocumentRegistry` 是 `docID.jsonl` 的唯一读写入口；检索引擎、索引构建器和爬虫不自行保存 `docID -> URL` 映射。
 
 ```python
 from pathlib import Path
@@ -124,4 +123,4 @@ python -m web.app
 
 ## 数据与提交
 
-`data/` 属于本地运行数据和可重建产物，不纳入 Git。`chunk_embeddings.npy` 第 \(i\) 行必须对应 `chunks.jsonl` 中 `chunk_id = i` 的记录，更新爬取语料后需要重建 chunk 和向量。
+`data/` 属于本地运行数据和可重建产物，不纳入 Git。`chunk_embeddings.npy` 第 $i$ 行必须对应 `chunks.jsonl` 中 `chunk_id = i` 的记录，更新爬取语料后需要重建 chunk 和向量。
