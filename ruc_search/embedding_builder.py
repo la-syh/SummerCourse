@@ -1,4 +1,4 @@
-import json
+import json, os
 from pathlib import Path
 
 import numpy as np
@@ -24,94 +24,118 @@ chunk 2: tokens 640 ~ 1023
 'text': chunk 原文
 }
 '''
-
 def split_text_to_chunks( 
-    text: str,
-    tokenizer,
-    chunk_tokens: int = 384,
-    overlap_tokens: int = 64,
-):
-    encoded = tokenizer(
-        text,
-        add_special_tokens=False,
-        return_offsets_mapping=True,
-        truncation=False,
-    )
-
-    token_ids = encoded["input_ids"]
-    offsets = encoded["offset_mapping"]
-    step = chunk_tokens - overlap_tokens
-    chunks = []
-    for chunk_index, start in enumerate(range(0, len(token_ids), step)):
-        end = min(start + chunk_tokens, len(token_ids))
-        char_start, char_end = offsets[start][0], offsets[end - 1][1]
-        chunk_text = text[char_start:char_end].strip()
-
-        if chunk_text:
-            chunks.append({
-                'chunk_index': chunk_index,
-                'token_start':start,
-                'token_end':end,
-                'char_start': char_start,
-                'char_end': char_end,
-                'text':chunk_text
-            })
-        if end == len(token_ids):
-            break
-    
-    return chunks
-
-
-def build_embedding(
-        project_root: Path,
-        doc_id_path: Path,
-        chunk_path: Path,
-        embedding_path: Path,
-        model: SentenceTransformer,
+        text: str,
+        tokenizer,
         chunk_tokens: int = 384,
-        overlap_tokens: int = 64,):
-    all_chunks = []
-    chunk_id = 0
+        overlap_tokens: int = 64,
+    ):
+        encoded = tokenizer(
+            text,
+            add_special_tokens=False,
+            return_offsets_mapping=True,
+            truncation=False,
+        )
 
-    with doc_id_path.open(encoding="utf-8") as reader:
-        for line in reader:
-            document = json.loads(line)
-            title, content = extract_page_content(
-                project_root / document["file"]
-            )
-            chunks = split_text_to_chunks(
-                content,
-                model.tokenizer,
-                chunk_tokens,
-                overlap_tokens,
-            )
-            for chunk in chunks:
-                all_chunks.append({
-                    "chunk_id": chunk_id,
-                    "doc_id": document["docID"],
-                    "url": document["url"],
-                    "title": title,
-                    **chunk,
+        token_ids = encoded["input_ids"]
+        offsets = encoded["offset_mapping"]
+        step = chunk_tokens - overlap_tokens
+        chunks = []
+        for chunk_index, start in enumerate(range(0, len(token_ids), step)):
+            end = min(start + chunk_tokens, len(token_ids))
+            char_start, char_end = offsets[start][0], offsets[end - 1][1]
+            chunk_text = text[char_start:char_end].strip()
+
+            if chunk_text:
+                chunks.append({
+                    'chunk_index': chunk_index,
+                    'token_start':start,
+                    'token_end':end,
+                    'char_start': char_start,
+                    'char_end': char_end,
+                    'text':chunk_text
                 })
-                chunk_id += 1
+            if end == len(token_ids):
+                break
+        
+        return chunks
 
-    with chunk_path.open("w", encoding="utf-8") as chunk_writer:
-        for chunk in all_chunks:
-            json.dump(chunk, chunk_writer, ensure_ascii=False)
-            chunk_writer.write("\n")
+class Embeddings:
+    def __init__(self, 
+                project_root: Path,
+                doc_id_path: Path,
+                chunk_path: Path,
+                embedding_path: Path,
+                model: SentenceTransformer,
+                chunk_tokens: int = 384,
+                overlap_tokens: int = 64,
+                remake: bool = False):
+        self.project_root = project_root
+        self.doc_id_path, self.chunk_path = doc_id_path, chunk_path
+        self.embedding_path = embedding_path
+        self.model, self.chunk_tokens, self.overlap_tokens = model, chunk_tokens, overlap_tokens
 
-    embeddings = model.encode(
-        [chunk["text"] for chunk in all_chunks],
-        batch_size=32,
-        show_progress_bar=True,
-        convert_to_numpy=True,
-        normalize_embeddings=True,
-    )
-    np.save(embedding_path, embeddings.astype(np.float32))
+        if remake or not os.path.exists(self.chunk_path):
+            self.build_chunks()
+        else:
+            self.load_chunks()
+        if remake or not os.path.exists(self.embedding_path):
+            self.build_embedding()
+        else:
+            self.load_embeddings()
+    def build_chunks(self, ):
+        self.all_chunks = []
+        chunk_id = 0
 
-    print(f"chunks: {len(all_chunks)}")
-    print(f"embedding shape: {embeddings.shape}")
+        with self.doc_id_path.open(encoding="utf-8") as reader:
+            for line in reader:
+                document = json.loads(line)
+                title, content = extract_page_content(
+                    self.project_root / document["file"]
+                )
+                chunks = split_text_to_chunks(
+                    content,
+                    self.model.tokenizer,
+                    self.chunk_tokens,
+                    self.overlap_tokens,
+                )
+                for chunk in chunks:
+                    self.all_chunks.append({
+                        "chunk_id": chunk_id,
+                        "doc_id": document["docID"],
+                        "url": document["url"],
+                        "title": title,
+                        **chunk,
+                    })
+                    chunk_id += 1
 
+        with self.chunk_path.open("w", encoding="utf-8") as chunk_writer:
+            for chunk in self.all_chunks:
+                json.dump(chunk, chunk_writer, ensure_ascii=False)
+                chunk_writer.write("\n")
+    def load_chunks(self):
+        if not self.chunk_path.exists():
+            raise FileExistsError(self.chunk_path)
+
+        with self.chunk_path.open('r', encoding='utf-8') as chunk_reader:
+            self.all_chunks = [json.loads(line) for line in chunk_reader]
+
+    def build_embedding(self):
+        self.embeddings = self.model.encode(
+            [chunk["text"] for chunk in self.all_chunks],
+            batch_size=32,
+            show_progress_bar=True,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )
+        np.save(self.embedding_path, self.embeddings.astype(np.float32))
+
+        print(f"chunks: {len(self.all_chunks)}")
+        print(f"embedding shape: {self.embeddings.shape}")
+    def load_embeddings(self):
+        if not os.path.exists(self.embedding_path):
+            raise FileExistsError(f'{self.embedding_path} 不存在')
+        self.embeddings = np.load(self.embedding_path)
 
 if __name__ == "__main__":
     project_root = Path(__file__).resolve().parents[1]
@@ -123,10 +147,11 @@ if __name__ == "__main__":
 
     chunk_tokens = 384
     overlap_tokens = 64
-    build_embedding(project_root=project_root,
+    builder = Embeddings(project_root=project_root,
                     doc_id_path=doc_id_path,
                     chunk_path=chunk_path, 
                     embedding_path=embedding_path,
                     model=model,
                     chunk_tokens=chunk_tokens, 
-                    overlap_tokens=overlap_tokens)
+                    overlap_tokens=overlap_tokens,
+                    remake = False)

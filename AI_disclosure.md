@@ -718,6 +718,22 @@ AI 建议按数据生命周期而不是按文件扩展名组织目录：抓取�
 
 AI 遍历了全部 chunk 元数据，确认 `chunk_id` 从 0 起连续递增，没有发现 ID 与行号不一致的记录；每条记录均包含 `doc_id`、URL、标题、token 起止位置、字符起止位置和原文。前 20 个 chunk 中的中文逐字空格问题已基本消失，说明基于 `offset_mapping` 的原文切片已生效。AI 还抽查了向量矩阵的首行、中间行和末行，向量范数均为 1，且所有数值均为有限值；`docID.jsonl` 中抽查的相对 HTML 路径也能够从项目根目录正确解析。这表明当前数据已满足实现 chunk 向量检索的基本一致性要求。本轮没有重新编码、删除或覆盖任何数据文件。
 
+#### 50. 审查首版 Embedding search_engine
+
+我请 AI 检查新编写的 `ruc_search/search_engine.py` 是否正确。AI 对包导入、`Embeddings` 初始化、查询编码、向量相似度、NumPy 索引、chunk 到文档的聚合和 BGE 查询指令进行了只读审查，并在 `conda html` 环境中执行语法编译和实际包导入测试。
+
+审查发现当前版本还不能运行：`from embedding_builder import Embeddings` 在以 `ruc_search` 包导入时会报 `ModuleNotFoundError`；`Embeddings.__init__()` 只在数据文件不存在时构建，但在现有 `chunks.jsonl` 和 `.npy` 存在时没有调用 `load_chunks()` 和 `load_embeddings()`，因此实例没有 `all_chunks` 和 `embeddings` 属性。同时，`load_chunks()` 误用 `json.dump()` 而不是逐行 `json.loads()`，并且多处使用了全局 `project_root`、`chunk_path` 和 `model` 而不是 `self` 属性。
+
+搜索函数也有三个确定错误：Python `list` 不能用 NumPy 整数数组直接索引；chunk 记录的字段名是 `doc_id` 而代码读取 `docID`；将前 (25k) 个 chunk 直接转成文档 ID 会产生大量重复页面，且返回数量不是 `topk`。正确方式是按 chunk 相似度顺序遍历，使用 `seen_doc_ids` 对页面去重，收集到 `topk` 个页面后停止。AI 还核对 BGE 官方模型卡，对短查询检索长段落建议在查询前加“为这个句子生成表示以用于检索相关文章：”，文档 chunk 不加该指令；当前 SentenceTransformer 实例的预置 prompt 为空，所以需手动加前缀或通过实验比较。本轮没有修改 `search_engine.py` 或 `embedding_builder.py`。
+
+#### 51. 回归测试修正后的 Embedding search_engine
+
+我按审查意见修正代码后，询问当前版本是否已经正确。AI 在 `conda html` 中重新执行了语法编译、`ruc_search.search_engine` 包导入、BGE 模型本地加载、75778 条 chunk 与向量的实际加载，以及查询矩阵乘法和文档去重测试。修正后的包导入已成功，初始化耗时约 0.353 秒，chunk 数与向量形状 `(75778, 512)` 一致。测试查询能在约 0.075 秒内返回 20 个不同文档 ID，说明默认非空查询主路径已经可运行。
+
+AI 同时发现两个剩余问题。第一，空查询仍会将 BGE 查询指令本身编码并返回 20 个任意语义结果；`topk=0` 时，由于停止条件只在追加文档后判断，实际返回了全部 15509 个有 chunk 的文档。搜索函数应在编码前对空查询和 `topk <= 0` 直接返回空列表，或按项目要求显式调用另一个默认结果策略。
+
+第二，向量检索主路径虽然正确，但对“许洪腾老师教授什么课程”的实测中，前五个结果只有一条许洪腾讲座页，两个许洪腾个人主页分别位于文档排名第 85 和第 86。这表明算法能运行不等于检索质量已达标；当前 chunk 向量没有显式编码页面标题，且导航模板噪声可能支配某些 chunk 的页面最大分数。后续应比较“标题加入 chunk 编码”、主内容去噪、标题精确匹配重排和 TF-IDF/Embedding 混合检索。本轮仅进行了回归验证和质量抽查，没有修改源代码。
+
 ### 三、AI 建议的采纳与待处理情况
 
 目前已采纳的建议包括：
