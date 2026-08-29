@@ -154,7 +154,7 @@ def multi_search(query: str, top_k: int = 5) -> list[SearchResult]:
     seen_urls = set()
     for search_query in build_search_queries(query):
         for result in search(search_query, top_k=top_k):
-            url = result["url"]
+            url = result.get('url', '')
             if url in seen_urls:
                 continue
             seen_urls.add(url)
@@ -180,7 +180,7 @@ def multi_search(query: str, top_k: int = 5) -> list[SearchResult]:
         second_hop_results = []
         for name in discovered_names:
             for result in search(f"{name} 教授课程", top_k=top_k):
-                url = result["url"]
+                url = result.get('url', '')
                 if url in seen_urls:
                     continue
                 seen_urls.add(url)
