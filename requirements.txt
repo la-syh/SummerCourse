@@ -1,4 +1,8 @@
+flask
+jieba
+markupsafe
 numpy
+openai
 requests
 resiliparse
 sentence-transformers

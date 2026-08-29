@@ -7,7 +7,10 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import requests
 
+from info import DocumentRecord, DocumentRegistry
+
 from .extractor import ExtractHTML
+from .content_dedup import ContentDeduplicator
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -15,6 +18,8 @@ DATA_DIR = PROJECT_ROOT / "data"
 HTML_DIR = DATA_DIR / "downloaded_html"
 DOC_ID_FILE = DATA_DIR / "docID.jsonl"
 CHECKPOINT_FILE = DATA_DIR / "crawler_checkpoint.json"
+FINGERPRINT_FILE = DATA_DIR / "content_fingerprints.jsonl"
+DUPLICATE_FILE = DATA_DIR / "duplicate_urls.jsonl"
 
 IGNORED_SUFFIXES = (
     ".zip", ".rar", ".7z", ".tar", ".tar.gz", ".tgz",
@@ -31,6 +36,9 @@ class Crawler:
         wait_time=1.0,
         max_count=200_000,
         save_interval=1000,
+        duplicate_hamming_threshold=7,
+        duplicate_minimum_similarity=0.85,
+        minimum_content_chars=200,
     ):
         self.start_urls = list(dict.fromkeys(start_urls))
         self.hostnames = list(dict.fromkeys(
@@ -43,7 +51,18 @@ class Crawler:
         self.headers = {"user-agent": "ruc-search-crawler/1.0"}
 
         HTML_DIR.mkdir(parents=True, exist_ok=True)
-        self.saved_urls, self.next_doc_id = self.load_saved_urls()
+        self.document_registry = DocumentRegistry(PROJECT_ROOT, DOC_ID_FILE)
+        saved_records = self.document_registry.records()
+        self.saved_urls = set(self.document_registry.urls())
+        self.content_deduplicator = ContentDeduplicator(
+            FINGERPRINT_FILE,
+            DUPLICATE_FILE,
+            hamming_threshold=duplicate_hamming_threshold,
+            minimum_similarity=duplicate_minimum_similarity,
+            minimum_content_chars=minimum_content_chars,
+        )
+        self.backfill_content_fingerprints(saved_records)
+        self.saved_urls.update(self.content_deduplicator.duplicate_urls)
         self.queues, self.all_links, self.last_fetch_time, self.count = \
             self.load_checkpoint()
 
@@ -95,11 +114,45 @@ class Crawler:
             return
 
         self.all_links.add(final_url)
+        try:
+            extracted_page = ExtractHTML(html)
+        except (TypeError, ValueError) as error:
+            print(f"HTML 解析失败: {final_url}: {error}")
+            return
+
         if final_url not in self.saved_urls:
-            self.save_html(final_url, html)
+            try:
+                content_text = extracted_page.extract_text()
+            except (TypeError, ValueError):
+                content_text = ""
+            signature = self.content_deduplicator.make_signature(
+                content_text,
+                extracted_page.extract_title(),
+            )
+            duplicate = self.content_deduplicator.find_duplicate(signature)
+            if duplicate is None:
+                doc_id = self.save_html(final_url, html)
+                self.content_deduplicator.add(
+                    doc_id,
+                    final_url,
+                    signature,
+                )
+            else:
+                self.content_deduplicator.record_duplicate(
+                    final_url,
+                    duplicate,
+                    signature,
+                )
+                print(
+                    "跳过近重复页面: "
+                    f"{final_url} -> {duplicate.url} "
+                    f"(similarity={duplicate.similarity:.3f})",
+                    flush=True,
+                )
             self.saved_urls.add(final_url)
 
-        for new_url in ExtractHTML(html).extract_links(final_url):
+        # 即使当前页面因内容重复而不保存，也继续发现其中的链接。
+        for new_url in extracted_page.extract_links(final_url):
             hostname = urlparse(new_url).hostname
             if hostname not in self.allowed_hostnames \
                     or new_url in self.all_links \
@@ -151,24 +204,48 @@ class Crawler:
         file_path = host_dir / f"{hashlib.sha256(url.encode()).hexdigest()}.html"
         file_path.write_bytes(html)
 
-        record = {
-            "docID": self.next_doc_id,
-            "url": url,
-            "file": file_path.relative_to(PROJECT_ROOT).as_posix(),
-        }
-        with DOC_ID_FILE.open("a", encoding="utf-8") as writer:
-            writer.write(json.dumps(record, ensure_ascii=False) + "\n")
-        self.next_doc_id += 1
+        record = self.document_registry.add(url, file_path)
+        return record.doc_id
 
-    @staticmethod
-    def load_saved_urls():
-        if not DOC_ID_FILE.exists():
-            return set(), 0
+    def backfill_content_fingerprints(
+        self,
+        records: tuple[DocumentRecord, ...],
+    ):
+        """首次升级时为已有 HTML 补建指纹，后续启动直接复用。"""
+        missing = [
+            record
+            for record in records
+            if record.url not in self.content_deduplicator.indexed_urls
+        ]
+        if not missing:
+            return
 
-        with DOC_ID_FILE.open(encoding="utf-8") as reader:
-            records = [json.loads(line) for line in reader]
-        saved_urls = {record["url"] for record in records}
-        return saved_urls, records[-1]["docID"] + 1
+        print(f"正在为 {len(missing)} 个已有网页补建内容指纹...", flush=True)
+        new_records = []
+        for position, record in enumerate(missing, start=1):
+            try:
+                html = record.html_path.read_bytes()
+                extracted_page = ExtractHTML(html)
+                text = extracted_page.extract_text()
+                title = extracted_page.extract_title()
+            except (OSError, TypeError, ValueError):
+                text = ""
+                title = ""
+            signature = self.content_deduplicator.make_signature(text, title)
+            new_records.append(
+                self.content_deduplicator.add(
+                    record.doc_id,
+                    record.url,
+                    signature,
+                    persist=False,
+                )
+            )
+            if position % 1000 == 0:
+                print(
+                    f"内容指纹: {position}/{len(missing)}",
+                    flush=True,
+                )
+        self.content_deduplicator.persist_records(new_records)
 
     def save_checkpoint(self):
         state = {

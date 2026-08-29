@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="RUC Search 本地网页搜索系统">
+    <title>RUC Search</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    >
+  </head>
+
+  <body class="home-page">
+    <main class="home-container">
+      <h1 class="logo">RUC Search</h1>
+      <p class="subtitle">中国人民大学网页搜索系统</p>
+
+      <form
+        class="search-form"
+        action="{{ url_for('query') }}"
+        method="get"
+      >
+        <input
+          class="search-input"
+          type="search"
+          name="key"
+          placeholder="输入要查询的关键词"
+          autocomplete="off"
+          required
+        >
+        <button class="search-button" type="submit">
+          搜索
+        </button>
+      </form>
+    </main>
+  </body>
+</html>

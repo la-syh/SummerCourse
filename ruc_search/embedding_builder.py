@@ -1,10 +1,10 @@
-import json, os
+import json
 from pathlib import Path
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-from .page_content import extract_page_content
+from info import DocumentRegistry, PageInfoStore
 
 '''
 chunk 0: tokens   0 ~ 383
@@ -62,24 +62,25 @@ def split_text_to_chunks(
 
 class Embeddings:
     def __init__(self, 
-                project_root: Path,
-                doc_id_path: Path,
+                document_registry: DocumentRegistry,
+                page_info_store: PageInfoStore,
                 chunk_path: Path,
                 embedding_path: Path,
                 model: SentenceTransformer,
                 chunk_tokens: int = 384,
                 overlap_tokens: int = 64,
                 remake: bool = False):
-        self.project_root = project_root
-        self.doc_id_path, self.chunk_path = doc_id_path, chunk_path
-        self.embedding_path = embedding_path
+        self.document_registry = document_registry
+        self.page_info_store = page_info_store
+        self.chunk_path = Path(chunk_path)
+        self.embedding_path = Path(embedding_path)
         self.model, self.chunk_tokens, self.overlap_tokens = model, chunk_tokens, overlap_tokens
 
-        if remake or not os.path.exists(self.chunk_path):
+        if remake or not self.chunk_path.exists():
             self.build_chunks()
         else:
             self.load_chunks()
-        if remake or not os.path.exists(self.embedding_path):
+        if remake or not self.embedding_path.exists():
             self.build_embedding()
         else:
             self.load_embeddings()
@@ -87,27 +88,25 @@ class Embeddings:
         self.all_chunks = []
         chunk_id = 0
 
-        with self.doc_id_path.open(encoding="utf-8") as reader:
-            for line in reader:
-                document = json.loads(line)
-                title, content = extract_page_content(
-                    self.project_root / document["file"]
-                )
-                chunks = split_text_to_chunks(
-                    content,
-                    self.model.tokenizer,
-                    self.chunk_tokens,
-                    self.overlap_tokens,
-                )
-                for chunk in chunks:
-                    self.all_chunks.append({
-                        "chunk_id": chunk_id,
-                        "doc_id": document["docID"],
-                        "url": document["url"],
-                        "title": title,
-                        **chunk,
-                    })
-                    chunk_id += 1
+        for document in self.document_registry:
+            page_info = self.page_info_store.get(document.url, cache=False)
+            title = page_info.title if page_info else ""
+            content = page_info.content if page_info else ""
+            chunks = split_text_to_chunks(
+                content,
+                self.model.tokenizer,
+                self.chunk_tokens,
+                self.overlap_tokens,
+            )
+            for chunk in chunks:
+                self.all_chunks.append({
+                    "chunk_id": chunk_id,
+                    "doc_id": document.doc_id,
+                    "url": document.url,
+                    "title": title,
+                    **chunk,
+                })
+                chunk_id += 1
 
         with self.chunk_path.open("w", encoding="utf-8") as chunk_writer:
             for chunk in self.all_chunks:
@@ -133,7 +132,7 @@ class Embeddings:
         print(f"chunks: {len(self.all_chunks)}")
         print(f"embedding shape: {self.embeddings.shape}")
     def load_embeddings(self):
-        if not os.path.exists(self.embedding_path):
+        if not self.embedding_path.exists():
             raise FileExistsError(f'{self.embedding_path} 不存在')
         self.embeddings = np.load(self.embedding_path)
 
@@ -144,11 +143,13 @@ if __name__ == "__main__":
     embedding_path = project_root / 'data' / 'chunk_embeddings.npy'
     MODEL_NAME = "BAAI/bge-small-zh-v1.5"
     model = SentenceTransformer(MODEL_NAME)
+    document_registry = DocumentRegistry(project_root, doc_id_path)
+    page_info_store = PageInfoStore(document_registry)
 
     chunk_tokens = 384
     overlap_tokens = 64
-    builder = Embeddings(project_root=project_root,
-                    doc_id_path=doc_id_path,
+    builder = Embeddings(document_registry=document_registry,
+                    page_info_store=page_info_store,
                     chunk_path=chunk_path, 
                     embedding_path=embedding_path,
                     model=model,

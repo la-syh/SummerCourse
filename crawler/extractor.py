@@ -1,9 +1,9 @@
 import re
 from urllib.parse import urldefrag, urljoin, urlparse
 
-from resiliparse.parse.encoding import detect_encoding
-from resiliparse.parse.html import HTMLTree
 from url_normalize import url_normalize
+
+from info.page_info import extract_text, extract_title, parse_html_bytes
 
 
 META_REFRESH = re.compile(
@@ -19,11 +19,19 @@ SCRIPT_REDIRECT = re.compile(
 
 class ExtractHTML:
     def __init__(self, html):
-        encoding = detect_encoding(html) or "utf-8"
-        self.document = HTMLTree.parse_from_bytes(
-            html,
-            encoding=encoding,
-        ).document
+        self.tree = parse_html_bytes(html)
+        self.document = self.tree.document
+
+    def extract_title(self):
+        return extract_title(self.tree)
+
+    def extract_text(self):
+        """提取用于内容指纹的正文，主内容过短时退回全部可见文字。"""
+        return extract_text(
+            self.tree,
+            main_content=True,
+            fallback_to_all=True,
+        )
 
     @staticmethod
     def normalize_link(href, base_url):
